@@ -28,6 +28,11 @@ start:
    popw %gs
    movw $LOADER_MEMORY_OFF,%di /*gs:di = the memory that loader will load.*/
 
+   call clearScreen
+
+   movw $loading,%bp
+   call dispStr
+
 .restart:
    call readSectors
    movw $DAP,%bp
@@ -47,7 +52,7 @@ start:
    cmpw $0x0,%ax
    je .restart /*If it isn't loader,`jmp` to .restart*/
 
-   movw $loader,%bp
+   movw $sucess,%bp
    call dispStr
 
    movw $farJmp,%si
@@ -96,7 +101,7 @@ cmpStr: /*Compare es:bp with gs:di*/
    cmpb %ah,%al
    jne .not
    incw %bp
-   incw %si
+   incw %di
    jmp .loop_
 .not:
    movw $0,%ax
@@ -105,13 +110,30 @@ cmpStr: /*Compare es:bp with gs:di*/
    movw $1,%ax
    ret
 
+clearScreen:
+   movb $0x6,%ah
+   movb $0x0,%al
+   movb $0x0,%cx
+   movb $24,%dh
+   movb $79,%dl
+   movb $0x7,%bh
+   int $0x10 /*Clear the screen.*/
+
+   movb $0x2,%ah
+   movb $0x0,%bh
+   movw $0x0,%dx
+   int $0x10 /*Move the cursor to 0,0.*/
+   ret
+
 /*DiskAddressPacket (for int $0x13)*/
 DAP: .long 0x0
      .long 0x0
      .long 0x0
      .long 0x0
 
-loader: .ascii "loader"
+loading: .ascii "Loading loader...."
+         .byte 0xa,0xd,0x0
+sucess: .ascii "Sucessful!"
         .byte 0xa,0xd,0x0
 noloader: .ascii "No loader."
      .byte 0xa,0xd,0x0
@@ -121,3 +143,6 @@ farJmp: .int 0x0
         .int 0x0
 
 .include "boot.inc.s"
+
+.org 510
+.int 0xAA55
