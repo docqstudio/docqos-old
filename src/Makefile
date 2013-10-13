@@ -1,3 +1,4 @@
+ROOT=..
 include ../Makefile.config
 
 first:dir_boot
