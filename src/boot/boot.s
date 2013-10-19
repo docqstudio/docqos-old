@@ -24,8 +24,8 @@ start:
    movw $LOADER_MEMORY_SEG,6(%si)
    movl $0x0,8(%si) /*Init DAP (for int $0x13).*/
 
-   pushw $LOADER_MEMORY_SEG
-   popw %gs
+   movw $LOADER_MEMORY_SEG,%ax
+   movw %ax,%gs
    movw $LOADER_MEMORY_OFF,%di /*gs:di = the memory that loader will load.*/
 
    call clearScreen
@@ -33,24 +33,24 @@ start:
    movw $loading,%bp
    call dispStr
 
-.restart:
+1: /*label restart*/
    call readSectors
    movw $DAP,%bp
    incl 8(%bp) /*Add one to LBA of DAP.*/
 
    cmpb $0,%ah
-   je .sucess
-.error:
+   je 3f /*f = forward*/
+2: /*label error*/
    movw $noloader,%bp
    call dispStr /*Display "No loader."*/
-   jmp .fin
+   jmp 4f
    
-.sucess:
+3: /*label sucess*/
    movw $LOADER_MAGIC_STRING,%bp
    movw $LOADER_MEMORY_OFF,%di
    call cmpStr /*Check loader.*/
    cmpw $0x0,%ax
-   je .restart /*If it isn't loader,`jmp` to .restart*/
+   je 1b /*If it isn't loader,`jmp` to restart(1b [b = backward])*/
 
    movw $sucess,%bp
    call dispStr
@@ -58,12 +58,16 @@ start:
    movw $farJmp,%si
    movw %di,(%si)
    movw %gs,2(%si)
-   ljmp *farJmp
+
+/*************************************/
+   ljmp *farJmp     /*GO INTO LOADER!*/
+/*************************************/
+
    
-.fin:
+4: /*label fin*/
    hlt
    nop
-   jmp .fin
+   jmp 4b
 
 readSectors:/*int $0x13*/
 
@@ -82,38 +86,38 @@ readSectors:/*int $0x13*/
 dispStr: /*Display string*/ /*es:bp = string*/
    movw $15,%bx
    movb $0xe,%ah
-.loop:
+1: /*label loop*/
    movb %es:(%bp),%al
    cmpb $0,%al
-   je .end
+   je 2f
    int $0x10
    incw %bp
-   jmp .loop
-.end:
+   jmp 1b
+2: /*label end*/
    ret
 
 cmpStr: /*Compare es:bp with gs:di*/
-.loop_:
+1: /*label loop*/
    movb %es:(%bp),%al
    cmpb $0,%al
-   je .yes
+   je 3f
    movb %gs:(%di),%ah
    cmpb %ah,%al
-   jne .not
+   jne 2f
    incw %bp
    incw %di
-   jmp .loop_
-.not:
+   jmp 1b
+2: /*label not*/
    movw $0,%ax
    ret
-.yes:
+3: /*label yes*/
    movw $1,%ax
    ret
 
 clearScreen:
    movb $0x6,%ah
    movb $0x0,%al
-   movb $0x0,%cx
+   movw $0x0,%cx
    movb $24,%dh
    movb $79,%dl
    movb $0x7,%bh
