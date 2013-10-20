@@ -1,5 +1,5 @@
-.set BOOTSEG , 0x7c0
 .set inBoot , 0
+.set BOOTSEG , 0x7c0
 
 .global _start
 
