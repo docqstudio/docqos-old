@@ -32,3 +32,7 @@
 .set DA_386TGATE    , 0x8F
 
 .set DA_LIMIT_4K    , 0x8000
+
+
+/*Some attributes of CPUID and EFLAGS.*/
+.set EFLAGS_AC_BIT  , 0x00040000

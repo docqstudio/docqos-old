@@ -36,6 +36,9 @@ start:
    movw $loading,%bp
    call dispStr
 
+   call checkExtandInt13HSupport
+   jc 5f
+
 1: /*label restart*/
    call readSectors
    movw $DAP,%bp
@@ -70,6 +73,11 @@ start:
 4: /*label fin*/
    hlt
    nop
+   jmp 4b
+
+5: /*label extand int $0x13 error*/
+   movw $int13HSupportError,%bp
+   call dispStr
    jmp 4b
 
 readSectors:/*int $0x13*/
@@ -132,6 +140,13 @@ clearScreen:
    int $0x10 /*Move the cursor to 0,0.*/
    ret
 
+checkExtandInt13HSupport:
+   movb $0x41,%ah
+   movw $0x55AA,%bx
+   movb (driveNumber),%dl
+   int $0x13
+   ret
+
 /*DiskAddressPacket (for int $0x13)*/
 DAP: .long 0x0
      .long 0x0
@@ -144,6 +159,8 @@ sucess: .ascii "Sucessful!"
         .byte 0xa,0xd,0x0
 noloader: .ascii "No loader."
      .byte 0xa,0xd,0x0
+int13HSupportError: .ascii "No support for extand int $0x13"
+      .byte 0xa,0xd,0x0
 driveNumber: .byte 0x0
 
 farJmp: .word 0x0
