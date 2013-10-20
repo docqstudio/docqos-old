@@ -13,10 +13,10 @@ cachedir:
 	mkdir .obj; \
 	fi
 
-.obj/boot.o:boot.s
+.obj/boot.o:boot.S
 	$(AS) $(ASFLAGS) -o $@ $<
 
-.obj/loader.o:loader.s
+.obj/loader.o:loader.S
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BIN)/boot.bin:.obj/boot.o

@@ -19,3 +19,5 @@ clean:dir_src_clean
 
 dir_src_clean:
 	cd src && $(MAKE) -f Makefile clean
+
+all: clean first

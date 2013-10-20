@@ -1,7 +1,10 @@
-BOOTSEG=0x7c0
-.section .text
-.code16
+.set BOOTSEG , 0x7c0
+.set inBoot , 0
+
 .global _start
+
+.section ".text" ,"ax"
+.code16
 _start: /*DL = driver number for CD (boot from CD) */
    jmpl $BOOTSEG,$start
 start:
@@ -9,7 +12,7 @@ start:
    movw %ax,%es
    movw %ax,%ds
    movw %ax,%fs
-   movw %ax,%gs /*Init segment register.*/
+   movw %ax,%gs /*Init segment registers.*/
 
    movw $BOOTSEG,%ax
    movw %ax,%ss
@@ -143,10 +146,10 @@ noloader: .ascii "No loader."
      .byte 0xa,0xd,0x0
 driveNumber: .byte 0x0
 
-farJmp: .int 0x0
-        .int 0x0
+farJmp: .word 0x0
+        .word 0x0
 
-.include "boot.inc.s"
+.include "boot.inc.S"
 
 .org 510
-.int 0xAA55
+.word 0xAA55
