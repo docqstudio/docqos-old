@@ -7,9 +7,40 @@
 .code16
 
 _start: .ascii "loader"
+   jmp start
+
+.include "pmode.inc.S"
+.include "lmode.inc.S"
+.include "boot.inc.S"
+
+/*GDT*/
+GDT:       GDTDescriptor 0x0, 0x0,     0x0
+GDTFlatC: GDTDescriptor 0x0, 0xFFFFF, DA_CR | DA_32 | DA_LIMIT_4K
+GDTFlatRW:GDTDescriptor 0x0, 0xFFFFF, DA_DRW | DA_LIMIT_4K
+GDTFlatC64: GDTDescriptor 0x0,0xFFFFF, DA_CR | DA_64 | DA_LIMIT_4K
+GDTFlatRW64:GDTDescriptor 0x0,0xFFFFF,DA_DRW | DA_64 | DA_LIMIT_4K
+GDTVideo: GDTDescriptor 0xB8000,0xFFFF,DA_DRW
+
+.set GDTLength    , . - GDT
+.set SelectorFlatC, GDTFlatC - GDT
+.set SelectorFlatRW,GDTFlatRW - GDT
+.set SelectorFlatC64,GDTFlatC64 - GDT
+.set SelectorFlatRW64,GDTFlatRW64 - GDT
+.set SelectorVideo,GDTVideo - GDT
+
+GDTR:.word GDTLength - 1
+      .long LOADER_MEMORY + GDT
+
+GDTR64:.word GDTLength - 1
+        .long LOADER_MEMORY + GDT
+        .long 0
+
+X86_64SupportError:
+       .ascii "No support for X86_64.\n"
+       .byte 0
+
 start:
    jmp entry32
-
 entry32: .code16
    movw %cs,%ax
    movw %ax,%ds
@@ -37,22 +68,23 @@ entry32: .code16
 
 protectedMode: .code32
 /*In Protected Mode!*/
-   movw %cs,%ax
+   movw $SelectorFlatRW,%ax
    movw %ax,%es
    movw %ax,%ds /*Init segment registers.*/
 
-   movw $SelectorFlatRW,%ax
    movw %ax,%ss
    movl $(BOOTSEG*0x10),%esp /*Init ss and esp.*/
 
    movw $SelectorVideo,%ax
    movw %ax,%gs
    movb $0x07,%ah
-   movl $((80*2 + 0)*2),%esi
+   movl $((80*2 + 0)*2),%esi /*Ready for displaying strings.*/
 
-   call CheckX86_64Support
+   call checkX86_64Support
    cmpb $0,%al
-   jne 1f
+   jne 1f /*If not support, `jmp` to 1f.*/
+
+   jmp entry64
 0:
    hlt /*Now interrupt is closed,so it will nerver exit!*/
    jmp 0b
@@ -89,7 +121,7 @@ dispStrPM: .code32 /*Display string in Protected Mode.*/
    movw %ax,%gs:(%esi)
 3: /*label next*/
    incl %ebp
-   add $0x2,%esi
+   addl $0x2,%esi
    jmp 1b
 2: /*label end*/
    ret
@@ -112,7 +144,7 @@ dispStrPM: .code32 /*Display string in Protected Mode.*/
    jmp 3b
 
 
-CheckX86_64Support:.code32 /*SMP and interrupt should be off!*/
+checkX86_64Support:.code32 /*SMP and interrupt should be off!*/
    pushl %edx
    pushl %eax
 
@@ -127,19 +159,22 @@ CheckX86_64Support:.code32 /*SMP and interrupt should be off!*/
    pushfl
    popl %ecx
    cmpl %edx,%ecx
-   jne 4f /*Don't support.*/
+   jne 4f /*No support(cpuid).*/
    pushl %eax
    popfl
 
    movl $0x80000000,%eax
-   cpuid /*Cheak extand cpuid support.*/
+   cpuid /*Check extand cpuid support.*/
    cmpl $0x8000004,%eax
-   jb 2f /*Don't support!*/
+   jb 2f /*No support!*/
 
    movl $0x80000001,%eax
    cpuid
    btl $29,%edx
-   jnc 3f
+   jnc 3f /*Check X86_64 support.*/
+
+   btl $26,%edx
+   jnc 3f /*Check 1GB page support.*/ /*It's temporary!!!*/
 
 1: /*label support*/
    popl %eax
@@ -164,25 +199,77 @@ CheckX86_64Support:.code32 /*SMP and interrupt should be off!*/
    movb $3,%al
    popl %edx
    ret
+5: /*label support 1GB page error*/ /*It's temporary!*/
+   popl %eax
+   movb $4,%al
+   popl %edx
+   ret
 
-.include "pmode.inc.S"
-.include "lmode.inc.S"
-.include "boot.inc.S"
+entry64: .code32
+   call pagingInit
 
-/*GDT*/
-GDT:       GDTDescriptor 0x0, 0x0,     0x0
-GDTFlatC: GDTDescriptor 0x0, 0xFFFFF, DA_CR | DA_32 | DA_LIMIT_4K
-GDTFlatRW:GDTDescriptor 0x0, 0xFFFFF, DA_DRW | DA_LIMIT_4K
-GDTVideo: GDTDescriptor 0xB8000,0xFFFF,DA_DRW
+   movl $PAGE_PML4E_MEMORY,%eax
+   movl %eax,%cr3
 
-.set GDTLength    , . - GDT
-.set SelectorFlatC, GDTFlatC - GDT
-.set SelectorFlatRW,GDTFlatRW - GDT
-.set SelectorVideo,GDTVideo - GDT
+   movl %cr4,%eax
+   orl $0x30,%eax
+   movl %eax,%cr4 /*Set %cr4.pse = %cr4.pae = 1.*/
 
-GDTR:.word GDTLength - 1
-      .long LOADER_MEMORY + GDT
+   movl $0x0c0000080,%ecx
+   rdmsr
+   btsl $8,%eax
+   wrmsr /*Set EFER.lme = 1.*/
 
-X86_64SupportError:
-       .ascii "No support for X86_64.\n"
-       .byte 0
+   movl %cr0,%eax
+   btsl $31,%eax
+   movl %eax,%cr0 /*%cr0.pg = 1*/
+   /*EFER.lma will set to 1 auto when %cr0.pg = 1 and EFER.lme = 1.*/
+   /*Then we will go into Long Mode.*/
+
+   jmp 1f
+1:
+   ljmp $SelectorFlatC64,$(LOADER_MEMORY + longMode)
+
+pagingInit: .code32 /*Init long mode paging.*/
+   movl $PAGE_PDPTE_MEMORY,%eax
+   movl $0x81,%ebx
+   movl $512,%ecx
+1:
+   movl %ebx,(%eax)
+   movl $0,4(%eax)
+   addl $8,%eax
+   loop 1b
+/*Init PDPTE.*/
+
+   movl $PAGE_PML4E_MEMORY,%eax
+   movl $(PAGE_PDPTE_MEMORY + 0x3),%ebx
+   movl $512,%ecx
+2:
+   movl %ebx,(%eax)
+   movl $0,4(%eax)
+   addl $8,%eax
+   loop 2b
+/*Init PML4E.*/
+   ret
+
+longMode: .code64
+   lgdt (LOADER_MEMORY + GDTR64) /*Load 64-bit gdt.*/
+
+   movw $SelectorFlatRW64,%ax
+   movw %ax,%ds
+   movw %ax,%es
+   movw %ax,%ss
+   movw %ax,%gs /*Init segment registers.*/
+
+   movq %rsp,%rax
+   pushq $SelectorFlatRW64
+   pushq %rax
+   pushfq
+   pushq $SelectorFlatC64
+   pushq $(fin + LOADER_MEMORY)
+   iretq /*Init cs.*/
+
+fin:
+   hlt
+   jmp fin
+
