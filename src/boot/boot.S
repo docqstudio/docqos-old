@@ -148,10 +148,7 @@ checkExtandInt13HSupport:
    ret
 
 /*DiskAddressPacket (for int $0x13)*/
-DAP: .long 0x0
-     .long 0x0
-     .long 0x0
-     .long 0x0
+DAP: .skip 0x10
 
 loading: .ascii "Loading loader...."
          .byte 0xa,0xd,0x0
