@@ -15,23 +15,30 @@ _start: .ascii "loader"
 
 /*GDT*/
 GDT:       GDTDescriptor 0x0, 0x0,     0x0
+GDTNormal:GDTDescriptor 0x0, 0xFFFFF,DA_DRW
+                                  /*It will be used when we return to Real Mode from Protected Mode*/
+GDTFlatC16:GDTDescriptor 0x0, 0xFFFFF,DA_CR | DA_16 | DA_LIMIT_4K
 GDTFlatC: GDTDescriptor 0x0, 0xFFFFF, DA_CR | DA_32 | DA_LIMIT_4K
 GDTFlatC64:GDTDescriptor 0x0, 0xFFFF, DA_CR | DA_64 | DA_LIMIT_4K
 GDTFlatRW:GDTDescriptor 0x0, 0xFFFFF, DA_DRW | DA_LIMIT_4K
 GDTVideo: GDTDescriptor 0xB8000,0xFFFF,DA_DRW
 
 .set GDTLength    , . - GDT
-.set SelectorFlatC, GDTFlatC - GDT
-.set SelectorFlatC64,GDTFlatC64 - GDT
-.set SelectorFlatRW,GDTFlatRW - GDT
-.set SelectorVideo,GDTVideo - GDT
+.set selectorNormal,GDTNormal - GDT
+.set selectorFlatC16,GDTFlatC16 - GDT
+.set selectorFlatC, GDTFlatC - GDT
+.set selectorFlatC64,GDTFlatC64 - GDT
+.set selectorFlatRW,GDTFlatRW - GDT
+.set selectorVideo,GDTVideo - GDT
+
+GDTR16:.word 0x0
+       .long 0x0 /*It will be saved by `sgdt`.*/
 
 GDTR:.word GDTLength - 1
       .long LOADER_MEMORY + GDT
 
 GDTR64:.word GDTLength - 1
-        .long LOADER_MEMORY + GDT
-        .long 0
+        .quad LOADER_MEMORY + GDT /*It is qword.*/
 
 X86_64SupportError:
        .ascii "No support for X86_64.\n"
@@ -42,13 +49,20 @@ goIntoProtectedMode: .ascii "Going into Protected Mode....\n\r"
         .byte 0
 goIntoLongMode: .ascii "Going into Long Mode...\n\r"
          .byte 0
-sucess:.ascii "Successful!\n\r"
+success:.ascii "Successful!\n\r"
         .byte 0
 
 PTEMemory: .long PAGE_START_MEMORY
 PDEMemory: .long 0x0
 PDPTEMemory: .long 0x0
 PML4EMemory: .long 0x0
+
+espSaved: .long 0x0
+esiSaved: .long 0x0
+eaxSaved: .long 0x0
+
+/*DiskAddressPacket (for int $0x13)*/
+DAP: .skip 0x10
 
 start:
    jmp entry32
@@ -63,6 +77,7 @@ entry32: .code16
    movw $goIntoProtectedMode,%bp
    call dispStrRM
 
+   sgdt (GDTR16) /*Save GDT in Real Mode.*/
    lgdt (GDTR) /*Load GDT.*/
 
    cli /*Close int.*/
@@ -78,25 +93,25 @@ entry32: .code16
 /*Go into Protected Mode true!*/
    .byte 0x66,0xea
    .long LOADER_MEMORY + protectedMode
-   .word SelectorFlatC
+   .word selectorFlatC
 /*It is the same as
-    `jmp dword SelectorFlatC:[LOAD_MEMORY + protectedMode] (nasm sytanx)*/
+    `jmp dword selectorFlatC:[LOAD_MEMORY + protectedMode] (nasm sytanx)*/
 
 protectedMode: .code32
 /*In Protected Mode!*/
-   movw $SelectorFlatRW,%ax
+   movw $selectorFlatRW,%ax
    movw %ax,%es
    movw %ax,%ds /*Init segment registers.*/
 
    movw %ax,%ss
    movl $(BOOTSEG*0x10),%esp /*Init ss and esp.*/
 
-   movw $SelectorVideo,%ax
+   movw $selectorVideo,%ax
    movw %ax,%gs
    movb $0x07,%ah
    movl $((80*4 + 0)*2),%esi /*Ready for displaying strings.*/
 
-   movl $(sucess + LOADER_MEMORY),%ebp
+   movl $(success + LOADER_MEMORY),%ebp
    call dispStrPM
    movl $(goIntoLongMode + LOADER_MEMORY),%ebp
    call dispStrPM
@@ -104,6 +119,9 @@ protectedMode: .code32
    call checkX86_64Support
    cmpb $0,%al
    jne 1f /*If not support, `jmp` to 1f.*/
+
+   movl $test,%eax
+   call callRMFunctionInPM
 
    jmp entry64
 0:
@@ -129,7 +147,7 @@ dispStrRM: .code16 /*Display string(es:bp) in Real Mode.*/
    ret
 
 dispStrPM: .code32 /*Display string in Protected Mode.*/
-                     /*gs = Selector Video ,es:ebp = String */
+                     /*gs = selector Video ,es:ebp = String */
                      /*ah = Color Code ,esi = Pos*/
 1: /*label loop*/
    movb %es:(%ebp),%al
@@ -200,6 +218,78 @@ dispStrLM: .code64 /*Display string in Long Mode.*/
    subq $0x2,%rsi /*Offset `add $0x2,%esi`.*/
 
    jmp 3b
+
+callRMFunctionInPM:.code32 /*It will return to Real Mode and `call *%eax` */
+                           /*Then it will go into Protected Mode again.*/
+   movl %esp,(espSaved + LOADER_MEMORY)
+   movl %esi,(esiSaved + LOADER_MEMORY)
+   movl %eax,(eaxSaved + LOADER_MEMORY)
+
+   ljmp $selectorFlatC16,$(3f + LOADER_MEMORY)
+3:.code16
+
+   movw $selectorNormal,%ax
+   movw %ax,%gs
+   movw %ax,%ds
+   movw %ax,%es
+   movw %ax,%ss
+   movw %ax,%fs
+
+   movl %cr0,%eax
+   andb $0xFE,%al
+   movl %eax,%cr0
+
+   jmpl $(LOADER_MEMORY/0x10),$1f
+1: .code16 /*label Real Mode*/
+   movw %cs,%ax
+   movw %ax,%ds
+   movw %ax,%es
+   movw %ax,%gs
+   movw %ax,%fs
+
+   inb $0x92,%al
+   andb $0xFD,%al
+   outb %al,$0x92 /*Close A20.*/
+
+   lgdt (GDTR16)
+
+   sti
+
+   movw $0,%ax
+   movw %ax,%ss
+   movl (espSaved),%esp /*NOTE: %esp can not be more than 0xFFFF.Or this function will be failed!*/
+
+   movl (eaxSaved),%eax
+   call *%eax
+
+   cli
+
+   lgdt (GDTR)
+
+   inb $0x92,%al
+   orb $0x2,%al /*Open A20.*/
+   outb %al,$0x92
+
+   movl %cr0,%eax
+   orl $0x1,%eax
+   movl %eax,%cr0
+
+   ljmp $selectorFlatC,$(LOADER_MEMORY + 2f)
+2:.code32 /*label Protected Mode*/
+   movw $selectorFlatRW,%ax
+   movw %ax,%ds
+   movw %ax,%es
+   movw %ax,%fs
+   movw %ax,%gs
+
+   movw %ax,%ss
+   movl (espSaved + LOADER_MEMORY),%esp
+
+   movl (esiSaved + LOADER_MEMORY),%esi
+   ret
+
+test:.code16
+   ret
 
 checkX86_64Support:.code32 /*SMP and interrupt should be off!*/
    pushl %edx
@@ -277,14 +367,14 @@ entry64: .code32
 
    jmp 1f
 1:
-   ljmp $SelectorFlatC64,$(LOADER_MEMORY + longMode)
+   ljmp $selectorFlatC64,$(LOADER_MEMORY + longMode)
 
 pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But now it is enough!*/
    /*Start to init PTE.*/
    movl (PTEMemory + LOADER_MEMORY),%eax
    movl $((1024*1024*1024*4)/(4*1024)),%ecx
    movl $(0 + 0x3),%edi
-1:
+1: /*label PTE loop*/
    movl %edi,(%eax)
    movl $0,4(%eax)
    addl $0x8,%eax
@@ -296,7 +386,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But no
    movl $((1024*1024*1024*4)/(2*1024*1024)),%ecx
    movl (PTEMemory + LOADER_MEMORY),%edi
    addl $0x3,%edi
-2:
+2: /*label PDE loop*/
    movl %edi,(%eax)
    movl $0,4(%eax)
    addl $0x8,%eax
@@ -307,7 +397,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But no
    movl $((1024*1024*1024*4)/(1024*1024*1024)),%ecx
    movl (PDEMemory + LOADER_MEMORY),%edi
    addl $0x3,%edi
-3:
+3: /*label PDPTE loop*/
    movl %edi,(%eax)
    movl $0,4(%eax)
    addl $0x8,%eax
@@ -315,7 +405,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But no
 
    movl $(512 - ((1024*1024*1024*4)/(1024*1024*1024))),%ecx
    movl $0x0,%edi
-4:
+4: /*label PDPTE empty loop*/
    movl %edi,(%eax)
    movl $0,4(%eax)
    addl $0x8,%eax
@@ -331,7 +421,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But no
 
    movl $0x0,%edi
    movl $(512 - 1),%ecx
-5:
+5: /*label PML4E empty loop*/
    movl %edi,(%eax)
    movl $0,4(%eax)
    addl $0x8,%eax
@@ -341,29 +431,29 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But no
 longMode: .code64
    lgdt (LOADER_MEMORY + GDTR64) /*Load 64-bit gdt.*/
 
-   movw $SelectorFlatRW,%ax
+   movw $selectorFlatRW,%ax
    movw %ax,%ds
    movw %ax,%es
    movw %ax,%ss
    movw %ax,%gs /*Init segment registers.*/
 
    movq %rsp,%rax
-   pushq $SelectorFlatRW
+   pushq $selectorFlatRW
    pushq %rax
    pushfq
-   pushq $SelectorFlatC64
-   pushq $(next + LOADER_MEMORY)
+   pushq $selectorFlatC64
+   pushq $(2f + LOADER_MEMORY)
    iretq /*Init cs.*/
 
-next:
+2: /*label next*/
    movq $0xB8000,%rbx
    movb $0x07,%ah
    //movq $((80*2 + 0)*2),%rsi /*Ready for displaying strings.*/
 
-   movq $(sucess + LOADER_MEMORY),%rbp
-   call dispStrLM
+   movq $(success + LOADER_MEMORY),%rbp
+   callq dispStrLM
 
-1:
+1: /*label loop*/
    hlt
    jmp 1b
 

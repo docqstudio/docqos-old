@@ -51,14 +51,14 @@ start:
    call dispStr /*Display "No loader."*/
    jmp 4f
    
-3: /*label sucess*/
+3: /*label success*/
    movw $LOADER_MAGIC_STRING,%bp
    movw $LOADER_MEMORY_OFF,%di
    call cmpStr /*Check loader.*/
    cmpw $0x0,%ax
    je 1b /*If it isn't loader,`jmp` to restart(1b [b = backward])*/
 
-   movw $sucess,%bp
+   movw $success,%bp
    call dispStr
 
    movw $farJmp,%si
@@ -152,7 +152,7 @@ DAP: .skip 0x10
 
 loading: .ascii "Loading loader...."
          .byte 0xa,0xd,0x0
-sucess: .ascii "Successful!"
+success: .ascii "Successful!"
         .byte 0xa,0xd,0x0
 noloader: .ascii "No loader."
      .byte 0xa,0xd,0x0

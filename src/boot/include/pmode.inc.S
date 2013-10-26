@@ -10,6 +10,7 @@
 
 /*There are some of GDT's attributes.*/
 .set DA_32          , 0x4000
+.set DA_16          , 0x0000
 
 .set DA_DPL0        , 0x00
 .set DA_DPL1        , 0x40
