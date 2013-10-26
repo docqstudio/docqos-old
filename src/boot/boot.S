@@ -152,7 +152,7 @@ DAP: .skip 0x10
 
 loading: .ascii "Loading loader...."
          .byte 0xa,0xd,0x0
-sucess: .ascii "Sucessful!"
+sucess: .ascii "Successful!"
         .byte 0xa,0xd,0x0
 noloader: .ascii "No loader."
      .byte 0xa,0xd,0x0

@@ -36,6 +36,14 @@ GDTR64:.word GDTLength - 1
 X86_64SupportError:
        .ascii "No support for X86_64.\n"
        .byte 0
+lineFeed:.ascii "\n\r"
+        .byte 0
+goIntoProtectedMode: .ascii "Going into Protected Mode....\n\r"
+        .byte 0
+goIntoLongMode: .ascii "Going into Long Mode...\n\r"
+         .byte 0
+sucess:.ascii "Successful!\n\r"
+        .byte 0
 
 PTEMemory: .long PAGE_START_MEMORY
 PDEMemory: .long 0x0
@@ -49,6 +57,11 @@ entry32: .code16
    movw %ax,%ds
    movw %ax,%gs
    movw %ax,%es /*Init segment registers again.*/
+
+   movw $lineFeed,%bp
+   call dispStrRM
+   movw $goIntoProtectedMode,%bp
+   call dispStrRM
 
    lgdt (GDTR) /*Load GDT.*/
 
@@ -81,7 +94,12 @@ protectedMode: .code32
    movw $SelectorVideo,%ax
    movw %ax,%gs
    movb $0x07,%ah
-   movl $((80*2 + 0)*2),%esi /*Ready for displaying strings.*/
+   movl $((80*4 + 0)*2),%esi /*Ready for displaying strings.*/
+
+   movl $(sucess + LOADER_MEMORY),%ebp
+   call dispStrPM
+   movl $(goIntoLongMode + LOADER_MEMORY),%ebp
+   call dispStrPM
 
    call checkX86_64Support
    cmpb $0,%al
@@ -115,16 +133,17 @@ dispStrPM: .code32 /*Display string in Protected Mode.*/
                      /*ah = Color Code ,esi = Pos*/
 1: /*label loop*/
    movb %es:(%ebp),%al
-   cmp $0,%al
+   cmpb $0,%al
    je 2f
    cmp $'\r',%al
-   je 3f
+   je 5f
    cmp $'\n',%al
    je 4f
    movw %ax,%gs:(%esi)
 3: /*label next*/
-   incl %ebp
    addl $0x2,%esi
+5: /*label _next*/
+   incl %ebp
    jmp 1b
 2: /*label end*/
    ret
@@ -146,6 +165,41 @@ dispStrPM: .code32 /*Display string in Protected Mode.*/
 
    jmp 3b
 
+dispStrLM: .code64 /*Display string in Long Mode.*/
+                     /*rbx = Video Memory ,rbp = String */
+                     /*ah = Color Code ,esi(rsi) = Pos*/
+1: /*label loop*/
+   movb (%rbp),%al
+   cmpb $0,%al
+   je 2f
+   cmp $'\r',%al
+   je 3f
+   cmp $'\n',%al
+   je 4f
+   movw %ax,(%rbx,%rsi,1)
+3: /*label next*/
+   incq %rbp
+   addq $0x2,%rsi
+   jmp 1b
+2: /*label end*/
+   ret
+4: /*label line feed*/
+   pushq %rax
+
+   movl %esi,%eax
+   movb $160,%cl
+   divb %cl
+   andl $0xFF,%eax /*Now eax = al = row number.*/
+
+   incl %eax /*eax = new row number.*/
+   mulb %cl
+   movl %eax,%esi
+
+   popq %rax
+
+   subq $0x2,%rsi /*Offset `add $0x2,%esi`.*/
+
+   jmp 3b
 
 checkX86_64Support:.code32 /*SMP and interrupt should be off!*/
    pushl %edx
@@ -225,10 +279,10 @@ entry64: .code32
 1:
    ljmp $SelectorFlatC64,$(LOADER_MEMORY + longMode)
 
-pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 1GB memory. But now it is enough!*/
+pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But now it is enough!*/
    /*Start to init PTE.*/
    movl (PTEMemory + LOADER_MEMORY),%eax
-   movl $((1024*1024*1024)/(4*1024)),%ecx
+   movl $((1024*1024*1024*4)/(4*1024)),%ecx
    movl $(0 + 0x3),%edi
 1:
    movl %edi,(%eax)
@@ -239,7 +293,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 1GB memory. But no
 
    /*Start to init PDE.*/
    movl %eax,(PDEMemory + LOADER_MEMORY)
-   movl $((1024*1024*1024)/(2*1024*1024)),%ecx
+   movl $((1024*1024*1024*4)/(2*1024*1024)),%ecx
    movl (PTEMemory + LOADER_MEMORY),%edi
    addl $0x3,%edi
 2:
@@ -250,7 +304,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 1GB memory. But no
 
    /*Start to init PDPTE.*/
    movl %eax,(PDPTEMemory + LOADER_MEMORY)
-   movl $((1024*1024*1024)/(1024*1024*1024)),%ecx
+   movl $((1024*1024*1024*4)/(1024*1024*1024)),%ecx
    movl (PDEMemory + LOADER_MEMORY),%edi
    addl $0x3,%edi
 3:
@@ -259,7 +313,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 1GB memory. But no
    addl $0x8,%eax
    loop 3b
 
-   movl $(512 - ((1024*1024*1024)/(1024*1024*1024))),%ecx
+   movl $(512 - ((1024*1024*1024*4)/(1024*1024*1024))),%ecx
    movl $0x0,%edi
 4:
    movl %edi,(%eax)
@@ -298,10 +352,18 @@ longMode: .code64
    pushq %rax
    pushfq
    pushq $SelectorFlatC64
-   pushq $(fin + LOADER_MEMORY)
+   pushq $(next + LOADER_MEMORY)
    iretq /*Init cs.*/
 
-fin:
+next:
+   movq $0xB8000,%rbx
+   movb $0x07,%ah
+   //movq $((80*2 + 0)*2),%rsi /*Ready for displaying strings.*/
+
+   movq $(sucess + LOADER_MEMORY),%rbp
+   call dispStrLM
+
+1:
    hlt
-   jmp fin
+   jmp 1b
 
