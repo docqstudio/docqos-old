@@ -4,9 +4,9 @@ include ../../Makefile.config
 ASFLAGS+=-I ./include
 
 OBJS=.obj/boot.o .obj/loader.o
-TARGERS=$(BIN)/boot.bin $(BIN)/loader.bin
+TARGETS=$(BIN)/boot.bin $(BIN)/loader.bin
 
-first:cachedir $(TARGERS)
+first:cachedir $(TARGETS)
 
 cachedir:
 	if [ ! -d .obj ]; then \
@@ -19,10 +19,10 @@ cachedir:
 .obj/loader.o:loader.S
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BIN)/boot.bin:.obj/boot.o
+$(BIN)/boot.bin:.obj/boot.o include/boot.inc.s
 	$(LD) $(LDFLAGS_BIN) -o $@ $<
 
-$(BIN)/loader.bin:.obj/loader.o
+$(BIN)/loader.bin:.obj/loader.o include/boot.inc.S include/pmode.inc.S include/lmode.inc.S
 	$(LD) $(LDFLAGS_BIN) -o $@ $<
 clean:
 	$(RM) .obj

@@ -25,7 +25,8 @@ start:
    movw $LOADER_SIZE_SECTOR,2(%si)
    movw $LOADER_MEMORY_OFF,4(%si)
    movw $LOADER_MEMORY_SEG,6(%si)
-   movl $0x0,8(%si) /*Init DAP (for int $0x13).*/
+   movl $0x0,8(%si)
+   movl $0x0,12(%si)/*Init DAP (for int $0x13).*/
 
    movw $LOADER_MEMORY_SEG,%ax
    movw %ax,%gs
@@ -65,6 +66,7 @@ start:
    movw %di,(%si)
    movw %gs,2(%si)
 
+   movb (driveNumber),%dl
 /*************************************/
    ljmp *farJmp     /*GO INTO LOADER!*/
 /*************************************/
