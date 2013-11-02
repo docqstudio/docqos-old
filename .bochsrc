@@ -350,7 +350,7 @@ vgaromimage: file=$BXSHARE/VGABIOS-lgpl-latest
 # Examples:
 #   vga: extension=cirrus, update_freq=10
 #=======================================================================
-#vga: extension=vbe, update_freq=5
+vga: extension=vbe
 
 #=======================================================================
 # FLOPPYA:
@@ -593,8 +593,8 @@ log: bochsout.txt
 # if you disable it you may get a spectacular disaster instead.
 #=======================================================================
 panic: action=ask
-error: action=report
-info: action=report
+error: action=ignore
+info: action=ignore
 debug: action=ignore
 
 #=======================================================================

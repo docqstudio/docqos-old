@@ -21,7 +21,6 @@ GDTFlatC16:GDTDescriptor 0x0, 0xFFFFF,DA_CR | DA_16 | DA_LIMIT_4K
 GDTFlatC: GDTDescriptor 0x0, 0xFFFFF, DA_CR | DA_32 | DA_LIMIT_4K
 GDTFlatC64:GDTDescriptor 0x0, 0xFFFF, DA_CR | DA_64 | DA_LIMIT_4K
 GDTFlatRW:GDTDescriptor 0x0, 0xFFFFF, DA_DRW | DA_LIMIT_4K
-GDTVideo: GDTDescriptor 0xB8000,0xFFFF,DA_DRW
 
 .set GDTLength    , . - GDT
 .set selectorNormal,GDTNormal - GDT
@@ -29,7 +28,6 @@ GDTVideo: GDTDescriptor 0xB8000,0xFFFF,DA_DRW
 .set selectorFlatC, GDTFlatC - GDT
 .set selectorFlatC64,GDTFlatC64 - GDT
 .set selectorFlatRW,GDTFlatRW - GDT
-.set selectorVideo,GDTVideo - GDT
 
 GDTR16:.word 0x0
        .long 0x0 /*It will be saved by `sgdt`.*/
@@ -53,6 +51,8 @@ success:.ascii "Successful!\n\r"
         .byte 0
 noKernel: .ascii "No kernel!\n\r"
          .byte 0
+vbeInitFailed: .ascii "Initing VBE failed!\n\r"
+              .byte 0
 readKernelFailed: .ascii "Reading kernel failed!\n\r"
           .byte 0
 
@@ -74,6 +74,8 @@ kernelSeekSector: .long 0x0
 DAP: .skip 0x10
 /*DriveParametersPacket*/
 DPP: .skip 0x1E
+
+palette: .byte 0xff,0xff,0xff,0x0
 
 start:
    movw %cs,%ax
@@ -104,6 +106,10 @@ start:
    jc 1f
    jmp 3f
 
+   call checkX86_64Support
+   cmpb $0,%al
+   jne 4f /*If not support, `jmp` to 1f.*/
+
 1: /*label nokernel*/
    movw $noKernel,%bp
    call dispStrRM
@@ -114,9 +120,16 @@ start:
 3:/*label next*/
    movl %eax,(kernelSectorNumber)
    jmp entry32
+4: /*label x86_64 support error*/
+   movw $X86_64SupportError,%bp
+   call dispStrRM
+   jmp 2b
 entry32: .code16
    movw $goIntoProtectedMode,%bp
    call dispStrRM
+
+   call vbeInit
+   jc 1f
 
    sgdt (GDTR16) /*Save GDT in Real Mode.*/
    lgdt (GDTR) /*Load GDT.*/
@@ -137,6 +150,13 @@ entry32: .code16
    .word selectorFlatC
 /*It is the same as
     `jmp dword selectorFlatC:[LOAD_MEMORY + protectedMode] (nasm sytanx)*/
+ 1: /*label failed to init VBE*/
+    movw $vbeInitFailed,%bp
+    call dispStrRM
+    cli
+ 2: /*label fin*/
+    hlt
+    jmp 1b
 
 searchKernel: .code16
    movw $KERNEL_MAGIC_STRING,%bp
@@ -234,38 +254,122 @@ driveSectorSize: .code16
 1: /*label error*/
    movw $0,%ax
    ret
+
+vbeInit: .code16
+   pushw %es
+
+   movw $0,%ax
+   movw %ax,%es
+   movw $VBE_INFO_MEMORY,%di
+   movw $0x4F00,%ax
+   int $0x10 /*Check support for VBE.*/
+   cmpw $0x4f,%ax
+   jne 1f
+
+   movw %es:4(%di),%ax
+   cmpw $0x0200,%ax /*VBE2.0 or more.*/
+   jb 1f
+
+   movw $VBE_DEFAULT_MODE,%cx
+   movw $0x4F01,%ax
+   int $0x10 /*Check support for VBE_DEFAULT.*/
+   cmpw $0x4f,%ax
+   jne 1f
+
+   movw %es:0x0(%di),%ax
+   andw $0x90,%ax
+   cmpw $0x90,%ax
+   jne 1f
+
+   movb %es:0x19(%di),%al
+   cmpb $0x18,%al
+   jne 1f
+
+   movb %es:0x1b(%di),%al
+   cmpb $0x06,%al
+   jne 1f
+
+   movw $(VBE_DEFAULT_MODE + 0x4000),%bx
+   movw $0x4f02,%ax
+   int $0x10 /*Enable VBE_DEFAULT_MODE.*/
+   popw %es
+
+   clc
+   ret
+1: /*label error*/
+   popw %es
+   stc
+   ret
+
+checkX86_64Support:.code16 /*SMP and interrupt should be off!*/
+   pushl %edx
+   pushl %eax
+
+   /*Check CPUID support. (486 supports but 386 doesn't)*/
+   pushfl
+   popl %eax
+   movl %eax,%edx
+   orl $EFLAGS_AC_BIT,%edx
+   pushl %edx
+   popfl
+
+   pushfl
+   popl %ecx
+   cmpl %edx,%ecx
+   jne 4f /*No support(cpuid).*/
+   pushl %eax
+   popfl
+
+   movl $0x80000000,%eax
+   cpuid /*Check extand cpuid support.*/
+   cmpl $0x8000004,%eax
+   jb 2f /*No support!*/
+
+   movl $0x80000001,%eax
+   cpuid
+   btl $29,%edx
+   jnc 3f /*Check X86_64 support.*/
+
+1: /*label support*/
+   popl %eax
+   movb $0,%al
+   popl %edx
+   ret
+2: /*label support extand cpuid error*/
+   popl %eax
+   movb $1,%al
+   popl %edx
+   ret
+3: /*label support X86_64 error*/
+   popl %eax
+   movb $2,%al
+   popl %edx
+   ret
+4: /*label 486 error*/
+   pushl %eax
+   popfl
+
+   popl %eax
+   movb $3,%al
+   popl %edx
+   ret
+
+
 protectedMode: .code32
 /*In Protected Mode!*/
    movw $selectorFlatRW,%ax
    movw %ax,%es
    movw %ax,%ds /*Init segment registers.*/
+   movw %ax,%gs
 
    movw %ax,%ss
    movl $(BOOTSEG*0x10),%esp /*Init ss and esp.*/
-
-   movw $selectorVideo,%ax
-   movw %ax,%gs
-   movb $0x07,%ah
-   movl $((80*4 + 0)*2),%esi /*Ready for displaying strings.*/
-
-   movl $(success + LOADER_MEMORY),%ebp
-   call dispStrPM
-   movl $(goIntoLongMode + LOADER_MEMORY),%ebp
-   call dispStrPM
-
-   call checkX86_64Support
-   cmpb $0,%al
-   jne 1f /*If not support, `jmp` to 1f.*/
 
    call readAndInitKernel
 
    jmp entry64
 0: /*label fin*/
    hlt
-   jmp 0b
-1: /*label x86_64 support error*/
-   movl $(LOADER_MEMORY + X86_64SupportError),%ebp
-   call dispStrPM
    jmp 0b
 
 readAndInitKernel: .code32
@@ -317,79 +421,6 @@ dispStrRM: .code16 /*Display string(es:bp) in Real Mode.*/
    jmp 1b
 2: /*label end*/
    ret
-
-dispStrPM: .code32 /*Display string in Protected Mode.*/
-                     /*gs = selector Video ,es:ebp = String */
-                     /*ah = Color Code ,esi = Pos*/
-1: /*label loop*/
-   movb %es:(%ebp),%al
-   cmpb $0,%al
-   je 2f
-   cmp $'\r',%al
-   je 5f
-   cmp $'\n',%al
-   je 4f
-   movw %ax,%gs:(%esi)
-3: /*label next*/
-   addl $0x2,%esi
-5: /*label _next*/
-   incl %ebp
-   jmp 1b
-2: /*label end*/
-   ret
-4: /*label line feed*/
-   pushl %eax
-
-   movl %esi,%eax
-   movb $160,%bl
-   divb %bl
-   andl $0xFF,%eax /*Now eax = al = row number.*/
-
-   incl %eax /*eax = new row number.*/
-   mulb %bl
-   movl %eax,%esi
-
-   popl %eax
-
-   subl $0x2,%esi /*Offset `add $0x2,%esi`.*/
-
-   jmp 3b
-
-dispStrLM: .code64 /*Display string in Long Mode.*/
-                     /*rbx = Video Memory ,rbp = String */
-                     /*ah = Color Code ,esi(rsi) = Pos*/
-1: /*label loop*/
-   movb (%rbp),%al
-   cmpb $0,%al
-   je 2f
-   cmp $'\r',%al
-   je 3f
-   cmp $'\n',%al
-   je 4f
-   movw %ax,(%rbx,%rsi,1)
-3: /*label next*/
-   incq %rbp
-   addq $0x2,%rsi
-   jmp 1b
-2: /*label end*/
-   ret
-4: /*label line feed*/
-   pushq %rax
-
-   movl %esi,%eax
-   movb $160,%cl
-   divb %cl
-   andl $0xFF,%eax /*Now eax = al = row number.*/
-
-   incl %eax /*eax = new row number.*/
-   mulb %cl
-   movl %eax,%esi
-
-   popq %rax
-
-   subq $0x2,%rsi /*Offset `add $0x2,%esi`.*/
-
-   jmp 3b
 
 callRMFunctionInPM:.code32 /*It will return to Real Mode and `call *%eax` */
                            /*Then it will go into Protected Mode again.*/
@@ -461,59 +492,6 @@ callRMFunctionInPM:.code32 /*It will return to Real Mode and `call *%eax` */
    popl %esi
    ret
 
-checkX86_64Support:.code32 /*SMP and interrupt should be off!*/
-   pushl %edx
-   pushl %eax
-
-   /*Check CPUID support. (486 supports but 386 doesn't)*/
-   pushfl
-   popl %eax
-   movl %eax,%edx
-   orl $EFLAGS_AC_BIT,%edx
-   pushl %edx
-   popfl
-
-   pushfl
-   popl %ecx
-   cmpl %edx,%ecx
-   jne 4f /*No support(cpuid).*/
-   pushl %eax
-   popfl
-
-   movl $0x80000000,%eax
-   cpuid /*Check extand cpuid support.*/
-   cmpl $0x8000004,%eax
-   jb 2f /*No support!*/
-
-   movl $0x80000001,%eax
-   cpuid
-   btl $29,%edx
-   jnc 3f /*Check X86_64 support.*/
-
-1: /*label support*/
-   popl %eax
-   movb $0,%al
-   popl %edx
-   ret
-2: /*label support extand cpuid error*/
-   popl %eax
-   movb $1,%al
-   popl %edx
-   ret
-3: /*label support X86_64 error*/
-   popl %eax
-   movb $2,%al
-   popl %edx
-   ret
-4: /*label 486 error*/
-   pushl %eax
-   popfl
-
-   popl %eax
-   movb $3,%al
-   popl %edx
-   ret
-
 entry64: .code32
    call pagingInit
 
@@ -560,6 +538,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But no
    movl %edi,(%eax)
    movl $0,4(%eax)
    addl $0x8,%eax
+   addl $0x1000,%edi
    loop 2b
 
    /*Start to init PDPTE.*/
@@ -571,6 +550,7 @@ pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But no
    movl %edi,(%eax)
    movl $0,4(%eax)
    addl $0x8,%eax
+   addl $0x1000,%edi
    loop 3b
 
    movl $(512 - ((1024*1024*1024*4)/(1024*1024*1024))),%ecx
@@ -628,12 +608,25 @@ longMode: .code64
    iretq /*Init cs.*/
 
 2: /*label next*/
-   movq $0xB8000,%rbx
+   xorq %rbx,%rbx
+   movl (0x7c10 + 40),%ebx
    movb $0x07,%ah
-   //movq $((80*2 + 0)*2),%rsi /*Ready for displaying strings.*/
-
-   movq $(success + LOADER_MEMORY),%rbp
-   callq dispStrLM
+   movq $0x100,%rsi /*Ready for displaying strings.*/
+//   addq $(1024*3*3),%rbx
+   movq $(1024*768),%rcx
+3: /*label loop*/
+   pushq %rcx
+   andq $0xFF,%rcx
+   movb %cl,(%rbx)
+   movb %cl,1(%rbx)
+   movb %cl,2(%rbx)
+   popq %rcx
+   addq $3,%rbx
+   decq %rcx
+   cmpq $0,%rcx
+   je 4f
+   jmp 3b
+4: /*label next*/
 
    xorq %rcx,%rcx
    movl $(LOADER_MEMORY + KERNEL_MAGIC_STRING),%ebp
@@ -644,7 +637,3 @@ longMode: .code64
 /************************************************/
    jmp *%rax  /*Go into kernel!!*/
 /************************************************/
-1: /*label loop*/
-   hlt
-   jmp 1b
-

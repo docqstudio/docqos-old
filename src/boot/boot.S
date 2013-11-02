@@ -158,7 +158,7 @@ success: .ascii "Successful!"
         .byte 0xa,0xd,0x0
 noloader: .ascii "No loader."
      .byte 0xa,0xd,0x0
-int13HSupportError: .ascii "No support for extand int $0x13"
+int13HSupportError: .ascii "No support for extand int $0x13."
       .byte 0xa,0xd,0x0
 driveNumber: .byte 0x0
 

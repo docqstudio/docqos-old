@@ -16,7 +16,11 @@
 
 .set KERNEL_REAL_MEMORY , 0x100000
 
-.set KERNEL_ENTRY_ADDRESS, 0x100000
+.set KERNEL_ENTRY_ADDRESS , 0x100000
+
+.set VBE_INFO_MEMORY , 0x7c10
+.set VBE_DEFAULT_MODE , 0x118
+
 .ifdef inBoot
 LOADER_MAGIC_STRING: .ascii "LOADER"
                      .byte 0x0
