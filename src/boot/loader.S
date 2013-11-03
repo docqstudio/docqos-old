@@ -75,8 +75,6 @@ DAP: .skip 0x10
 /*DriveParametersPacket*/
 DPP: .skip 0x1E
 
-palette: .byte 0xff,0xff,0xff,0x0
-
 start:
    movw %cs,%ax
    movw %ax,%ds
@@ -258,9 +256,9 @@ driveSectorSize: .code16
 vbeInit: .code16
    pushw %es
 
-   movw $0,%ax
+   movw $VBE_INFO_MEMORY_SEG,%ax
    movw %ax,%es
-   movw $VBE_INFO_MEMORY,%di
+   movw $0x0,%di
    movw $0x4F00,%ax
    int $0x10 /*Check support for VBE.*/
    cmpw $0x4f,%ax
@@ -270,9 +268,12 @@ vbeInit: .code16
    cmpw $0x0200,%ax /*VBE2.0 or more.*/
    jb 1f
 
+   movw $VBE_MODE_INFO_MEMORY_SEG,%ax
+   movw %ax,%es
+   movw $0x0,%di
    movw $VBE_DEFAULT_MODE,%cx
    movw $0x4F01,%ax
-   int $0x10 /*Check support for VBE_DEFAULT.*/
+   int $0x10 /*Check support for VBE_DEFAULT_MODE.*/
    cmpw $0x4f,%ax
    jne 1f
 
@@ -608,26 +609,6 @@ longMode: .code64
    iretq /*Init cs.*/
 
 2: /*label next*/
-   xorq %rbx,%rbx
-   movl (0x7c10 + 40),%ebx
-   movb $0x07,%ah
-   movq $0x100,%rsi /*Ready for displaying strings.*/
-//   addq $(1024*3*3),%rbx
-   movq $(1024*768),%rcx
-3: /*label loop*/
-   pushq %rcx
-   andq $0xFF,%rcx
-   movb %cl,(%rbx)
-   movb %cl,1(%rbx)
-   movb %cl,2(%rbx)
-   popq %rcx
-   addq $3,%rbx
-   decq %rcx
-   cmpq $0,%rcx
-   je 4f
-   jmp 3b
-4: /*label next*/
-
    xorq %rcx,%rcx
    movl $(LOADER_MEMORY + KERNEL_MAGIC_STRING),%ebp
    call strlen

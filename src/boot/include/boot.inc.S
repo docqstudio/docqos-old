@@ -13,10 +13,15 @@
 
 .set KERNEL_REAL_MEMORY   , 0x100000 /*The buf memory of kernel.*/
 
-.set KERNEL_ENTRY_ADDRESS , 0x100000 /*-Ttext set it!*/ /*It is 1MB + 1KB.*/
+.set KERNEL_ENTRY_ADDRESS , 0x100000 /*It is 1MB.*/
+                                     /*It is the same as KERNEL_REAL_MEMORY.*/
+				     /*Because the kernel is a binary file.*/
 
-.set VBE_INFO_MEMORY      , 0x7c10   /*The memory of vbe controller information or vbe mode information.*/
-.set VBE_DEFAULT_MODE     , 0x118
+.set VBE_INFO_MEMORY_SEG           , 0x8000   /*The memory of vbe controller info.(seg)*/
+                                              /*Offset = 0x0.*/
+.set VBE_MODE_INFO_MEMORY_SEG      , 0x9000   /*The memory of vbe mode information.(seg)*/
+                                              /*Offset = 0x0*/
+.set VBE_DEFAULT_MODE     , 0x118    /*The default mode of VBE modes.*/
 
 .ifdef inBoot
 LOADER_MAGIC_STRING: .ascii "LOADER"

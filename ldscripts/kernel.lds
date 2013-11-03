@@ -8,4 +8,9 @@ SECTIONS {
       *(.magic)
       *(.text)
    }
+   . = ALIGN(8);
+   .data : {*(.data)}
+   . = ALIGN(8);
+   .bss : {*(.bss)}
+   /DISCARD/ : { *.* }
 }
