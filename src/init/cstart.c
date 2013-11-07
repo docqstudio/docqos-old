@@ -2,8 +2,11 @@
 
 int kmain(void)
 {
-   vesaInit();
-   drawAndFillRect(0xFF,0xFF,0xFF,50,300,250,250);
-   drawAndFillRect(0x1C,0xED,0x53,70,20,200,100);
+   initVESA(); /*Init vesa.*/
+   
+   writeColorString(0x00,0xFF,0x00, /*Green.*/
+      "------------------kmain started------------------\n");
+   writeString("Initialize VESA sucessfully.\n");
+
    return 0;
 }

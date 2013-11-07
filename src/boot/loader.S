@@ -102,11 +102,15 @@ start:
 
    call searchKernel
    jc 1f
-   jmp 3f
 
+   pushl %eax
    call checkX86_64Support
    cmpb $0,%al
    jne 4f /*If not support, `jmp` to 1f.*/
+
+   call getVGAFonts
+   popl %eax
+   jmp 3f
 
 1: /*label nokernel*/
    movw $noKernel,%bp
@@ -119,6 +123,7 @@ start:
    movl %eax,(kernelSectorNumber)
    jmp entry32
 4: /*label x86_64 support error*/
+   popl %eax
    movw $X86_64SupportError,%bp
    call dispStrRM
    jmp 2b
@@ -302,6 +307,26 @@ vbeInit: .code16
    stc
    ret
 
+getVGAFonts: .code16
+   pushw %ds
+   pushw %es
+
+   movw $0x1130,%ax
+   movb $6,%bh
+   int $0x10
+
+   movw %es,%ax
+   movw %ax,%ds
+   movw %bp,%si
+   movw $(256*16/4),%cx
+   movw $VGA_BITMAP_FONTS_MEMORY_SEG,%ax
+   movw %ax,%es
+   movw $0,%di
+   rep movsd
+   popw %es
+   popw %ds
+   ret
+
 checkX86_64Support:.code16 /*SMP and interrupt should be off!*/
    pushl %edx
    pushl %eax
@@ -317,9 +342,9 @@ checkX86_64Support:.code16 /*SMP and interrupt should be off!*/
    pushfl
    popl %ecx
    cmpl %edx,%ecx
-   jne 4f /*No support(cpuid).*/
+   jne 4f /*No support(cpuid).*
    pushl %eax
-   popfl
+   popfl*/
 
    movl $0x80000000,%eax
    cpuid /*Check extand cpuid support.*/

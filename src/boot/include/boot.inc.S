@@ -5,7 +5,7 @@
  /*The memory that loader will be load.*/
 
 
-.set KERNEL_SIZE_SECTOR  , 0x3 /*The size of kernel.*/
+.set KERNEL_SIZE_SECTOR  , 0x20 /*The size of kernel.*/
 .set KERNEL_MEMORY_SEG   , 0x1000 /*The memory that kernel will load. (seg)*/
 .set KERNEL_MEMORY_OFF   , 0x0 /*The memory that kernel will load. (off)*/
 .set KERNEL_MEMORY       , KERNEL_MEMORY_SEG * 0x10 + KERNEL_MEMORY_OFF
@@ -20,8 +20,11 @@
 .set VBE_INFO_MEMORY_SEG           , 0x8000   /*The memory of vbe controller info.(seg)*/
                                               /*Offset = 0x0.*/
 .set VBE_MODE_INFO_MEMORY_SEG      , 0x9000   /*The memory of vbe mode information.(seg)*/
-                                              /*Offset = 0x0*/
+                                              /*Offset = 0x0.*/
 .set VBE_DEFAULT_MODE     , 0x118    /*The default mode of VBE modes.*/
+
+.set VGA_BITMAP_FONTS_MEMORY_SEG   , 0x7000 /*The memory of VGA's bitmap fonts.(seg)*/
+                                            /*Offset = 0x0.*/
 
 .ifdef inBoot
 LOADER_MAGIC_STRING: .ascii "LOADER"
