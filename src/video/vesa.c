@@ -1,4 +1,4 @@
-#include <vesa/vesa.h>
+#include <video/vesa.h>
 #include <core/const.h>
 #include <lib/string.h>
 

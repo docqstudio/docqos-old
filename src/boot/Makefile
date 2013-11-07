@@ -19,7 +19,7 @@ cachedir:
 .obj/loader.o:loader.S
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BIN)/boot.bin:.obj/boot.o include/boot.inc.s
+$(BIN)/boot.bin:.obj/boot.o include/boot.inc.S
 	$(LD) $(LDFLAGS_BIN) -o $@ $<
 
 $(BIN)/loader.bin:.obj/loader.o include/boot.inc.S include/pmode.inc.S include/lmode.inc.S

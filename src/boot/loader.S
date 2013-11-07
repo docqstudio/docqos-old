@@ -108,7 +108,6 @@ start:
    cmpb $0,%al
    jne 4f /*If not support, `jmp` to 1f.*/
 
-   call getVGAFonts
    popl %eax
    jmp 3f
 
@@ -305,26 +304,6 @@ vbeInit: .code16
 1: /*label error*/
    popw %es
    stc
-   ret
-
-getVGAFonts: .code16
-   pushw %ds
-   pushw %es
-
-   movw $0x1130,%ax
-   movb $6,%bh
-   int $0x10
-
-   movw %es,%ax
-   movw %ax,%ds
-   movw %bp,%si
-   movw $(256*16/4),%cx
-   movw $VGA_BITMAP_FONTS_MEMORY_SEG,%ax
-   movw %ax,%es
-   movw $0,%di
-   rep movsd
-   popw %es
-   popw %ds
    ret
 
 checkX86_64Support:.code16 /*SMP and interrupt should be off!*/

@@ -22,13 +22,13 @@ cachedir:
 
 .obj/start.o:init/start.S
 	$(AS) $(ASFLAGS) -o $@ $<
-.obj/cstart.o:init/cstart.c ../include/vesa/vesa.h ../include/lib/string.h ../include/core/const.h
+.obj/cstart.o:init/cstart.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
-.obj/vesa.o:vesa/vesa.c ../include/vesa/vesa.h ../include/lib/string.h ../include/core/const.h
+.obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
-.obj/font.o:vesa/font.c ../include/core/const.h
+.obj/font.o:video/font.c ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)
