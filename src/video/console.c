@@ -2,7 +2,7 @@
 #include <lib/stdarg.h>
 #include <lib/string.h>
 
-int vsprintk(char *buf,const char *string,VarArgsList list);
+char *vsprintk(char *buf,const char *string,VarArgsList list);
 
 int printkInColor(u8 red,u8 green,u8 blue,const char *string, ...)
 {
@@ -27,7 +27,7 @@ int printk(const char *string, ...)
    writeString(buf);
    return ret;
 }
-int vsprintk(char *buf,const char *string,VarArgsList list) 
+char *vsprintk(char *buf,const char *string,VarArgsList list) 
 /*Now it only supports %d,%x,%s.*/
 {
    char temp[256];

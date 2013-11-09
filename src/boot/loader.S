@@ -329,6 +329,7 @@ getMemoryInfo:.code16
    movw %ax,%es
    movw $0,%di
    xorl %ebx,%ebx
+   movl $0,%ds:0
 1: /*label loop*/
    movl $0xe820,%eax
    movl $20,%ecx
