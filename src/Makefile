@@ -2,7 +2,8 @@ ROOT=..
 include ../Makefile.config
 
 TARGET=$(ROOT)/bin/kernel
-OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o
+OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
+   .obj/console.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -29,6 +30,8 @@ cachedir:
 .obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/font.o:video/font.c ../include/core/const.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/console.o:video/console.c ../include/core/const.h ../include/video/vesa.h ../include/lib/stdarg.h
 	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)

@@ -16,6 +16,8 @@
 #define FONT_DISPLAY_WIDTH (FONT_WIDTH_EVERY_CHAR + 0x2)
 #define FONT_DISPLAY_HEIGHT (FONT_HEIGHT_EVERY_CHAR + 0x2)
 
+#define FONT_TAB_WIDTH (FONT_DISPLAY_WIDTH * 0x4)
+
 extern u8 fontASC16[];
 
 static VBEInfo currentVBEInfo = {};
@@ -138,6 +140,21 @@ int writeColorString(u8 red,u8 green,u8 blue,const char *string)
       case '\n': /*Line feed?*/
          x = xRes; /*Let x = the end of the line.*/
 	 break;
+      case '\t':
+         {
+/* |---tab---||---tab---||---tab---|
+ * ------------------- (x+a)--------
+ * -----------------|-a-|-----------
+ * -----------|--p--|---------------
+ * ----------------(x)--------------
+ * xyzabcedefdakpoew---------------- */
+	    int p = x % (FONT_TAB_WIDTH);
+	    int a = FONT_TAB_WIDTH - p; 
+	    x -= FONT_DISPLAY_WIDTH; /*Offset x += FONT_DISPLAY_WIDTH;*/
+	    if(!p)break;
+            x += a; 
+	    break;
+	 }
       default:
          drawChar(red,green,blue,x,y,c);
 	 break;
