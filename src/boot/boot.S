@@ -168,4 +168,4 @@ farJmp: .word 0x0
 .include "boot.inc.S"
 
 .org 510
-.word 0xAA55
+.word 0xaa55

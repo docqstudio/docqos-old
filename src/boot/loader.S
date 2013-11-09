@@ -15,12 +15,12 @@ _start: .ascii "LOADER"
 
 /*GDT*/
 GDT:       GDTDescriptor 0x0, 0x0,     0x0
-GDTNormal:GDTDescriptor 0x0, 0xFFFFF,DA_DRW
+GDTNormal:GDTDescriptor 0x0, 0xfffff,DA_DRW
                                   /*It will be used when we return to Real Mode from Protected Mode*/
-GDTFlatC16:GDTDescriptor 0x0, 0xFFFFF,DA_CR | DA_16 | DA_LIMIT_4K
-GDTFlatC: GDTDescriptor 0x0, 0xFFFFF, DA_CR | DA_32 | DA_LIMIT_4K
-GDTFlatC64:GDTDescriptor 0x0, 0xFFFF, DA_CR | DA_64 | DA_LIMIT_4K
-GDTFlatRW:GDTDescriptor 0x0, 0xFFFFF, DA_DRW | DA_LIMIT_4K
+GDTFlatC16:GDTDescriptor 0x0, 0xfffff,DA_CR | DA_16 | DA_LIMIT_4K
+GDTFlatC: GDTDescriptor 0x0, 0xfffff, DA_CR | DA_32 | DA_LIMIT_4K
+GDTFlatC64:GDTDescriptor 0x0, 0xfffff, DA_CR | DA_64 | DA_LIMIT_4K
+GDTFlatRW:GDTDescriptor 0x0, 0xfffff, DA_DRW | DA_LIMIT_4K
 
 .set GDTLength    , . - GDT
 .set selectorNormal,GDTNormal - GDT
@@ -54,6 +54,8 @@ noKernel: .ascii "No kernel!\n\r"
 vbeInitFailed: .ascii "Initing VBE failed!\n\r"
               .byte 0
 readKernelFailed: .ascii "Reading kernel failed!\n\r"
+          .byte 0
+canNotGetMemoryInfo: .ascii "Can't get memory info!\n\r"
           .byte 0
 
 PTEMemory: .long PAGE_START_MEMORY
@@ -108,6 +110,9 @@ start:
    cmpb $0,%al
    jne 4f /*If not support, `jmp` to 1f.*/
 
+   call getMemoryInfo
+   jc 5f
+
    popl %eax
    jmp 3f
 
@@ -125,6 +130,13 @@ start:
    popl %eax
    movw $X86_64SupportError,%bp
    call dispStrRM
+   cli
+   jmp 2b
+5:
+   popl %eax
+   movw $canNotGetMemoryInfo,%bp
+   call dispStrRM
+   cli
    jmp 2b
 entry32: .code16
    movw $goIntoProtectedMode,%bp
@@ -247,7 +259,7 @@ driveSectorSize: .code16
    movw $DPP,%si
    movb $0x48,%ah
 
-   movw $0x1E,(%si)
+   movw $0x1e,(%si)
 
    int $0x13
    jc 1f
@@ -263,7 +275,7 @@ vbeInit: .code16
    movw $VBE_INFO_MEMORY_SEG,%ax
    movw %ax,%es
    movw $0x0,%di
-   movw $0x4F00,%ax
+   movw $0x4f00,%ax
    int $0x10 /*Check support for VBE.*/
    cmpw $0x4f,%ax
    jne 1f
@@ -276,7 +288,7 @@ vbeInit: .code16
    movw %ax,%es
    movw $0x0,%di
    movw $VBE_DEFAULT_MODE,%cx
-   movw $0x4F01,%ax
+   movw $0x4f01,%ax
    int $0x10 /*Check support for VBE_DEFAULT_MODE.*/
    cmpw $0x4f,%ax
    jne 1f
@@ -303,6 +315,38 @@ vbeInit: .code16
    ret
 1: /*label error*/
    popw %es
+   stc
+   ret
+
+getMemoryInfo:.code16
+   pushw %ds
+   pushw %es
+
+   movw $MEMORY_INFO_NUMBER_MEMORY_SEG,%ax
+   movw %ax,%ds
+
+   movw $MEMORY_INFO_MEMORY_SEG,%ax
+   movw %ax,%es
+   movw $0,%di
+   xorl %ebx,%ebx
+1: /*label loop*/
+   movl $0xe820,%eax
+   movl $20,%ecx
+   movl $0x0534d4150,%edx
+   int $0x15
+   jc 2f
+   addw $20,%di
+   incl %ds:0
+   cmpl $0,%ebx
+   jne 1b
+
+   popw %es
+   popw %ds
+   ret
+
+2: /*label error*/
+   popw %es
+   popw %ds
    stc
    ret
 
@@ -457,7 +501,7 @@ callRMFunctionInPM:.code32 /*It will return to Real Mode and `call *%eax` */
    movw %ax,%fs
 
    inb $0x92,%al
-   andb $0xFD,%al
+   andb $0xfd,%al
    outb %al,$0x92 /*Close A20.*/
 
    lgdt (GDTR16)

@@ -122,7 +122,7 @@ static int screenUp(int numberOfLine)
    return 0;
 }
 
-int writeColorString(u8 red,u8 green,u8 blue,const char *string)
+int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
 {
    char c;
    const u32 xRes = currentVBEModeInfo.xResolution;
@@ -167,6 +167,7 @@ int writeColorString(u8 red,u8 green,u8 blue,const char *string)
 	 if(y + FONT_DISPLAY_HEIGHT > yRes) 
 	 {
 	    screenUp(1);
+	    y -= FONT_DISPLAY_HEIGHT;
 	 }
       }
    }

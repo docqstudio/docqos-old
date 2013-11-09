@@ -23,7 +23,9 @@
                                               /*Offset = 0x0.*/
 .set VBE_DEFAULT_MODE     , 0x118    /*The default mode of VBE modes.*/
 
-.set VGA_BITMAP_FONTS_MEMORY_SEG   , 0x7000 /*The memory of VGA's bitmap fonts.(seg)*/
+.set MEMORY_INFO_NUMBER_MEMORY_SEG , 0x7000 /*The memory of the number of memory info.(seg)*/
+                                            /*Offset = 0x0*/
+.set MEMORY_INFO_MEMORY_SEG        , 0x7001 /*The memory of memory info. (seg)*/
                                             /*Offset = 0x0.*/
 
 .ifdef inBoot

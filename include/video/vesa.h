@@ -85,12 +85,12 @@ int fillRect(
 int initVESA(void);
 int drawChar(u8 red,u8 green,u8 blue,int x,int y,unsigned char charDrawing);
 int drawString(u8 red,u8 green,u8 blue,int x,int y,const char *string);
-int writeColorString(u8 red,u8 green,u8 blue,const char *string);
+int writeStringInColor(u8 red,u8 green,u8 blue,const char *string);
 
 inline int drawPoint(u8 red,u8 green,u8 blue,int x,int y){
    return fillRect(red,green,blue,x,y,0x1,0x1);
 }
 
 inline int writeString(const char *string){
-   return writeColorString(0xFF,0xFF,0xFF,string);
+   return writeStringInColor(0xFF,0xFF,0xFF,string);
 }

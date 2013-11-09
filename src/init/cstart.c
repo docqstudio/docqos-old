@@ -1,4 +1,6 @@
 #include <video/vesa.h>
+#include <video/console.h>
+#include <memory/memory.h>
 #include <lib/string.h>
 
 #define GDT_SIZE (6*8)
@@ -18,11 +20,11 @@ int kmain(void)
 
    initVESA(); /*Init vesa.*/
    
-   writeColorString(0x00,0xFF,0x00, /*Green.*/
+   writeStringInColor(0x00,0xFF,0x00, /*Green.*/
       "------------------kmain started------------------\n");
    writeString("Initialize VESA sucessfully.\n");
 
-   printk("\t%x \t%d",246,246);
-
+   if(!initMemory()) 
+      return -1; /*Error!*/
    return 0;
 }

@@ -3,7 +3,7 @@ include ../Makefile.config
 
 TARGET=$(ROOT)/bin/kernel
 OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
-   .obj/console.o
+   .obj/console.o .obj/memory.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -27,11 +27,14 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
-.obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h
+.obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h \
+            ../include/video/console.h ../include/memory/memory.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/font.o:video/font.c ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/console.o:video/console.c ../include/core/const.h ../include/video/vesa.h ../include/lib/stdarg.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/memory.o:memory/memory.c ../include/memory/memory.h ../include/video/console.h
 	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)
