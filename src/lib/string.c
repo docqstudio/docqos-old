@@ -17,6 +17,7 @@ void *memcpy(void *to,const void *from,int n) /*NOTE: It's easy enough,but it's 
       : "c" (n / 4), "a" (n), "D" (to), "S" (from)
        /* n/4 -> %rcx , n -> %rax , to -> %rdi , from -> %rsi*/
       :"memory");
+   return to;
 }
 
 char *itoa(long val, char *buf, unsigned int radix,
@@ -76,7 +77,7 @@ int strlen(const char *string)
    const u32 *dwordString;
    u32 dword;
 
-   for(charString = string;((pointer)(string)) & (sizeof(u32) - 1) != 0;++charString)
+   for(charString = string;(((pointer)(string)) & (sizeof(u32) - 1)) != 0;++charString)
    {
       if(*charString == '\0')
          return charString - string;
@@ -86,7 +87,7 @@ int strlen(const char *string)
    for(;;)
    {
       dword = *(dwordString++);
-      if((((dword + 0x7efefeffL) ^~dword) & ~ 0x7efefeffL) != 0)
+      if((((dword + 0x7efefeffL) ^~dword) & (~ 0x7efefeffL)) != 0)
       {
          charString = (const char *)(dwordString - 1);
 	 if(charString[0] == '\0')

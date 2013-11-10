@@ -13,7 +13,7 @@ int printkInColor(u8 red,u8 green,u8 blue,const char *string, ...)
    ret = (int)(vsprintk(buf,string,list) - buf);
    varArgsEnd(list);
    writeStringInColor(red,green,blue,buf);
-   return 0;
+   return ret;
 }
 /*It returns how many chars it displayed.*/
 int printk(const char *string, ...)

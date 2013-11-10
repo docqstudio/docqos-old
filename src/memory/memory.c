@@ -10,30 +10,41 @@
 
 static MemoryARDS memoryInformation[MEMORY_INFO_MAX_NUMBER] = {};
 static u32 memoryInformationNumber = 0;
-
-//static int displayMemoryInformation(void);
+static u64 memorySize = 0;
 
 static int displayMemoryInformation(void)
 {
    char buf[256];
+   u64 base,limit,temp;
+   u32 type;
    buf[0] = '0';buf[1] = 'x';
-   MemoryARDS info;
    printk("\nDisplaying memory information...\n");
-   printkInColor(0x00,0xFF,0x00,"BaseAddrL  BaseAddrH  LengthLow  LengthHigh   Type\n");
+   printkInColor(0x00,0xFF,0x00,"Base Address:      Limit:             Type:\n");
    for(int i = 0;i < memoryInformationNumber; ++i)
    {
-      info = memoryInformation[i];
-      itoa(info.baseAddrLow,buf + 2,0x10,8,'0',1);
+      base = (u64)(memoryInformation[i].baseAddrLow);
+      base |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);
+      limit = (u64)(memoryInformation[i].lengthLow);
+      limit |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);
+      type = memoryInformation[i].type;
+      itoa(base,buf + 2,0x10,16,'0',1);
       printk("%s ",buf);
-      itoa(info.baseAddrHigh,buf + 2,0x10,8,'0',1);
+      itoa(limit,buf + 2,0x10,16,'0',1);
       printk("%s ",buf);
-      itoa(info.lengthHigh,buf + 2,0x10,8,'0',1);
-      printk("%s ",buf);
-      itoa(info.lengthLow,buf + 2,0x10,8,'0',1);
-      printk("%s ",buf);
-      itoa(info.type,buf + 2,0x10,8,'0',1);
+      itoa(type,buf + 2,0x10,8,'0',1);
       printk("%s\n",buf);
+      if(type == 0x1)
+      {
+         temp = base + limit;
+         if(temp > memorySize)
+            memorySize = temp;
+      }
    }
+   itoa(memorySize,buf + 2,0x10,16,'0',1);
+   printkInColor(0x00,0xFF,0xFF,"Memory size: %s bytes",buf);
+   itoa(memorySize / 1024 / 1024 + 1,buf,10,0,' ',1);
+   printkInColor(0x00,0xFF,0xFF,"(About %s MB).\n",buf);
+
    return 0;
 }
 
@@ -57,5 +68,6 @@ int initMemory(void)
    (const void *)MEMORY_INFO_ADDRESS, /*from*/
    memoryInformationNumber * sizeof(MemoryARDS) /*n*/);
    displayMemoryInformation();
+   printk("\n");
    return 0;
 }
