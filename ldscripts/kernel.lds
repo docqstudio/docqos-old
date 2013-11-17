@@ -15,5 +15,8 @@ SECTIONS {
    . = ALIGN(8);
    .bss : {*(.bss)}
 
+   . = ALIGN(8);
+   endAddressOfKernel = .;
+
    /DISCARD/ : { *.* }
 }

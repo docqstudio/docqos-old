@@ -63,7 +63,7 @@ int initLocalApic(void)
 
    setupLocalApicTimer(0x0); /*Disable.*/
 
-   printk("Initialize Local Apic successful!\n");
+   printk("Initialize Local Apic successfully!\n");
    return 0;
 }
 

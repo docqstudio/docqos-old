@@ -13,16 +13,16 @@ cachedir:
 	mkdir .obj; \
 	fi
 
-.obj/boot.o:boot.S
+.obj/boot.o:boot.S include/boot.inc.S
 	$(AS) $(ASFLAGS) -o $@ $<
 
-.obj/loader.o:loader.S
+.obj/loader.o:loader.S include/boot.inc.S include/pmode.inc.S include/lmode.inc.S
 	$(AS) $(ASFLAGS) -o $@ $<
 
-$(BIN)/boot.bin:.obj/boot.o include/boot.inc.S
+$(BIN)/boot.bin:.obj/boot.o 
 	$(LD) $(LDFLAGS_BIN) -o $@ $<
 
-$(BIN)/loader.bin:.obj/loader.o include/boot.inc.S include/pmode.inc.S include/lmode.inc.S
+$(BIN)/loader.bin:.obj/loader.o
 	$(LD) $(LDFLAGS_BIN) -o $@ $<
 clean:
 	$(RM) .obj

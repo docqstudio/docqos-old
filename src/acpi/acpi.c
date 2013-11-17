@@ -70,7 +70,7 @@ static int parseApic(ACPIHeaderApic *apic)
       case APIC_TYPE_LOCAL_APIC:
          {
 	    LocalApic *localApic = (LocalApic *)apicHeader;
-	    printk("Found CPU: processor ID => %d, apic ID => %d \n",
+	    printk("Found CPU: Processor ID => %d, Apic ID => %d \n",
 	       (int)localApic->apicProcessorID,(int)localApic->apicID);
             break;
 	 }
@@ -149,6 +149,7 @@ static int parseRSDP(u8 *rsdp)
    {
       char oem[7];
       memcpy((void *)oem,(const void *)rsdp + 9,sizeof(oem)/sizeof(char) - 1);
+      oem[6] = '\0';
       printk("OEM = %s,",oem);
    }
    u8 version = rsdp[15];

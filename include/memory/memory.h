@@ -10,3 +10,5 @@ typedef struct MemoryARDS {
 } __attribute__ ((packed)) MemoryARDS;
 
 int initMemory(void);
+
+u64 getMemorySize(void);

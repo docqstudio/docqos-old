@@ -1,6 +1,9 @@
 #include <core/const.h>
 #include <lib/string.h>
 #include <memory/memory.h>
+#include <memory/buddy.h>
+#include <memory/slab.h>
+#include <memory/kmalloc.h>
 #include <video/console.h>
 
 /*Saved in loader.*/
@@ -8,9 +11,41 @@
 #define MEMORY_INFO_ADDRESS        0x70010
 #define MEMORY_INFO_MAX_NUMBER     15
 
+extern u8 endAddressOfKernel; /*Defined in ldscripts/kernel.lds.*/
+
 static MemoryARDS memoryInformation[MEMORY_INFO_MAX_NUMBER] = {};
 static u32 memoryInformationNumber = 0;
 static u64 memorySize = 0;
+
+static int parseMemoryInformation(void)
+{
+   u32 startPageIndex,endPageIndex;
+   u64 base,limit;
+   PhysicsPage *memoryMap = getMemoryMap();
+   pointer endOfKernel = 
+      (pointer)(&endAddressOfKernel + getPhysicsPageCount()*sizeof(PhysicsPage) + 1);
+   for(int i = 0;i < memoryInformationNumber; ++i)
+   {
+      base = (u64)(memoryInformation[i].baseAddrLow);
+      base |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);  
+      limit = (u64)(memoryInformation[i].lengthLow);
+      limit |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);
+      limit += base;
+      if(memoryInformation[i].type != 0x1)
+         continue;
+      if(limit < endOfKernel)
+         continue;
+      if(base < endOfKernel)
+         base = endOfKernel;
+      startPageIndex = (base >> (3*4)) + 1;
+      endPageIndex = ((limit + 0xfff) >> (3*4)) - 1;
+      for(int j = startPageIndex;j < endPageIndex;++j)
+      {
+         freePages(memoryMap + j,0);
+      }
+   }
+   return 0;
+}
 
 static int displayMemoryInformation(void)
 {
@@ -67,7 +102,36 @@ int initMemory(void)
    memcpy((void *)memoryInformation, /*to*/
    (const void *)MEMORY_INFO_ADDRESS, /*from*/
    memoryInformationNumber * sizeof(MemoryARDS) /*n*/);
+
    displayMemoryInformation();
+   initBuddySystem();
+   parseMemoryInformation();
+
+   initSlab();
+
+   initKMalloc();
+
+   printk("Try to use kmalloc.....\n");
+
+   void *obj1 = kmalloc(48);
+   void *obj0 = kmalloc(16);
+   void *obj2 = kmalloc(100);
+
+   printk("Obj0:%x Obj1:%x Obj2:%x\n",obj0,obj1,obj2);
+
+   printk("Try to use kfree.....\n");
+
+   kfree(obj1);
+   kfree(obj0);
+   kfree(obj2);
+
+   printk("Successful!\n");
+
    printk("\n");
    return 0;
+}
+
+u64 getMemorySize(void)
+{
+   return memorySize;
 }
