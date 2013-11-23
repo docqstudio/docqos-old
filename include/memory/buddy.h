@@ -1,5 +1,6 @@
 #pragma once
 #include <core/list.h>
+#include <memory/paging.h>
 
 typedef enum PhysicsPageFlags{
    PageReserved = (1 << 0),
@@ -17,6 +18,9 @@ typedef struct PhysicsPage{
 inline void *getPhysicsPageAddress(PhysicsPage *page)
    __attribute__ ((always_inline));
 
+inline PhysicsPage *getPhysicsPage(void *obj)
+   __attribute__ ((always_inline));
+
 int initBuddySystem(void);
 
 int freePages(PhysicsPage *page,unsigned int order);
@@ -28,5 +32,14 @@ PhysicsPage *getMemoryMap(void);
 inline void *getPhysicsPageAddress(PhysicsPage *page)
 {
    PhysicsPage *memoryMap = getMemoryMap();
-   return (void *)(pointer)(((u64)(page - memoryMap))*0x1000);
+   void *physicsAddress = 
+      (void *)(pointer)(((u64)(page - memoryMap))*0x1000);
+   return pa2va(physicsAddress);
+}
+
+inline PhysicsPage *getPhysicsPage(void *obj)
+{
+   PhysicsPage *memoryMap = getMemoryMap();
+   pointer physicsObj = va2pa(obj);
+   return (memoryMap + ((physicsObj) >> (3*4)));
 }

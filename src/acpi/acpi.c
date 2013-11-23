@@ -1,7 +1,9 @@
 #include <core/const.h>
 #include <lib/string.h>
 #include <acpi/acpi.h>
+#include <memory/paging.h>
 #include <video/console.h>
+
 
 typedef struct ACPIHeader{
    u32 signature;
@@ -56,7 +58,7 @@ static int parseApic(ACPIHeaderApic *apic)
    temp[0] = '0';temp[1] = 'x';
    itoa(apic->localApicAddress,temp + 2,0x10,8,'0',1);
    printk("\nLocal Apic Address: %s\n",temp);
-   localApicAddress = (u8 *)(pointer)apic->localApicAddress;
+   localApicAddress = (u8 *)pa2va(apic->localApicAddress);
 
    u8 *start = apic->data;
    u8 *end = ((u8 *)apic) + apic->header.length;
@@ -80,7 +82,7 @@ static int parseApic(ACPIHeaderApic *apic)
 	    itoa(ioApic->ioApicAddress,temp + 2,0x10,8,'0',1);
             printk("Found I/O Apic : I/O Apic ID => %d, I/O Apic Address => %s\n",
 	       (int)ioApic->ioApicID,temp);
-	    ioApicAddress = (u8 *)(pointer)ioApic->ioApicAddress;
+	    ioApicAddress = (u8 *)pa2va(ioApic->ioApicAddress);
             break;
 	 }
       case APIC_TYPE_INTERRUPT_OVERRIDE:
@@ -115,7 +117,7 @@ static int parseXSDT(ACPIHeader *xsdt)
    while(start < end)
    {
       u32 dt = *(start++);
-      parseDT((ACPIHeader *)(pointer)dt);
+      parseDT((ACPIHeader *)pa2va(dt));
    }
    return 0;
 }
@@ -127,7 +129,7 @@ static int parseRSDT(ACPIHeader *rsdt)
    while(start < end)
    {
       u32 dt = *(start++);
-      parseDT((ACPIHeader *)(pointer)dt);
+      parseDT((ACPIHeader *)pa2va(dt));
    }
    return 0;
 }
@@ -157,15 +159,15 @@ static int parseRSDP(u8 *rsdp)
    if(version == 0)
    {
       u32 rsdt = *(u32 *)(rsdp + 16);
-      parseRSDT((ACPIHeader *)(pointer)rsdt);
+      parseRSDT((ACPIHeader *)pa2va(rsdt));
    }else if(version == 2)
    {
       u64 xsdt = *(u64 *)(rsdp + 24);
       u32 rsdt = *(u32 *)(rsdp + 16);
       if(xsdt)
-         parseXSDT((ACPIHeader *)(pointer)xsdt);
+         parseXSDT((ACPIHeader *)pa2va(xsdt));
       else
-         parseRSDT((ACPIHeader *)(pointer)rsdt);
+         parseRSDT((ACPIHeader *)pa2va(rsdt));
    }else{
       printkInColor(0xff,0x00,0x00,"\nUnknow ACPI's version!!!\n");
       return -1;
@@ -188,8 +190,8 @@ u8 *getIOApicAddress(void)
 
 int initACPI(void)
 {
-   u8 *start = (u8 *)0xe0000;
-   u8 * const end   = (u8 *)0xfffff; /*BIOS read-only area.*/
+   u8 *start = (u8 *)pa2va(0xe0000);
+   u8 * const end   = (u8 *)pa2va(0xfffff); /*BIOS read-only area.*/
    while(start < end){
       u64 signature = *(u64 *)start;
       if(signature == *(const u64 *)"RSD PTR ")

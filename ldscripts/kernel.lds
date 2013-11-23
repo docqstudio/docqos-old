@@ -3,19 +3,21 @@ OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)  
   
 SECTIONS {
-   . = 0x100000;
+   . = 0x8000100000;
    .text : {
       *(.magic)
       *(.text*)
    }
-   . = ALIGN(8);
-   .rodata : {*(.rodata*)}
-   . = ALIGN(8);
-   .data : {*(.data)}
-   . = ALIGN(8);
-   .bss : {*(.bss)}
 
-   . = ALIGN(8);
+   .rodata : {*(.rodata*)}
+   .data : {
+      *(COMMON)
+      *(.data)
+   }
+   .bss : {
+      *(.bss)
+   }
+
    endAddressOfKernel = .;
 
    /DISCARD/ : { *.* }

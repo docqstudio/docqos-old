@@ -63,10 +63,9 @@ void *kmalloc(unsigned int size)
 
 int kfree(const void *obj)
 {
-   PhysicsPage *memoryMap,*page;
+   PhysicsPage *page;
    SlabCache *cache;
-   memoryMap = getMemoryMap();
-   page = memoryMap + (((u64)obj) >> (3*4));
+   page = getPhysicsPage((void *)obj);
    cache = (SlabCache *)page->list.next;
 
 #ifdef CONFIG_DEBUG

@@ -5,6 +5,7 @@
 
 interruptOccurrent: .ascii "An interrupt is occurrent.\n"
           .byte 0
+
 .section ".text","ax"
 .code64
 
@@ -14,9 +15,9 @@ defaultInterruptHandler:
    pushq %rax
    pushq %rcx
    pushq %rdx
-   movl $interruptOccurrent,%edi
-   movl %edi,%ebx
-   xorl %eax,%eax
+   movabs $interruptOccurrent,%rdi
+   movq %rdi,%rbx
+   xorq %rax,%rax
    callq printk
    movl $0xFEE000B0,%eax
    movl $0,(%eax)

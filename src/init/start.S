@@ -1,14 +1,13 @@
-.global _start
-.extern kinit
-.extern kmain
-
 .section ".magic"
 .ascii "KERNEL"
 
 .section ".text","ax"
 .code64
+.global _start
+.extern kmain
+
 _start:
-   movq $stackTop,%rax
+   movabs $stackTop,%rax
    movq %rax,%rsp
 
    callq kmain
@@ -18,17 +17,8 @@ _start:
    hlt
    jmp 0b
 
-.section ".bss"
+.section ".bss","aw"
+.code32
 stack:
 .fill 0x1000,0x1,0x0
 stackTop:
-
-/*Kernel Page Tabel(NO PTE).*/
-kernelPDEDir:
-.fill 0x512,0x8,0x0
-
-kernelPDPTEDir:
-.fill 0x512,0x8,0x0
-
-kernelPML4EDir:
-.fill 0x512,0x8,0x0

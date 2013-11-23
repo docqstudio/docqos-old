@@ -81,7 +81,6 @@ static int destorySlab(SlabCache *cache,Slab *slab)
    PhysicsPage *page = memoryMap + (((u64)(obj)) >> (4*3));
 
    cache->freeObjCount -= cache->perSlabObjCount;
-   cache->localCache[0]->avail = 0;/*Must refill local cache.*/
    listDelete(&slab->list);
    slabFreePages(cache,page);
    return 0;
@@ -163,14 +162,13 @@ static int flushLocalCache(SlabCache *cache)
    u32 batchCount = localCache->batchCount;
    void **objects = localCache->data;
    Slab *slab;
-   PhysicsPage *memoryMap = getMemoryMap();
    PhysicsPage *page;
    u32 objnr;
 
    for(int i = 0;i < batchCount;++i)
    {
       void *obj = objects[i];
-      page = memoryMap + (((u64)obj) >> (3*4)); /*Get page index.*/
+      page = getPhysicsPage(obj); /*Get page index.*/
       slab = (Slab *)page->list.prev; /*Get slab,see also allocSlabForSlabCache.*/
       objnr = (obj - slab->memory) / cache->objSize;
 

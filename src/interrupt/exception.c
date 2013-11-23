@@ -10,7 +10,7 @@ typedef struct ExceptionRegisters
    u64 rip,cs,rflags,rsp,ss; /*CPU pushed.*/
 } __attribute__ ((packed)) ExceptionRegisters;
 
-int handleException(ExceptionRegisters regs) __attribute__((regparm(3)));
+int handleException(ExceptionRegisters regs) __attribute__((regparm(0)));
 int handleException(ExceptionRegisters regs)
 {
    static const char *exceptionInformation[20] =

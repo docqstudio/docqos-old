@@ -1,6 +1,7 @@
 #include <video/vesa.h>
 #include <core/const.h>
 #include <lib/string.h>
+#include <memory/paging.h>
 
 typedef struct VBEInfo{
    u8 signature[4];
@@ -78,11 +79,8 @@ typedef struct VBEModeInfo{
 
 
 
-#define VBE_INFO_ADDRESS          0x80000
-#define VBE_MODE_INFO_ADDRESS     0x90000
-
-#define VGA_BITMAP_FONTS_ADDRESS  0x70000
-#define VGA_BITMAP_FONTS_SIZE     0x1000 /*4KB*/
+#define VBE_INFO_ADDRESS          (0x80000ul + PAGE_OFFSET)
+#define VBE_MODE_INFO_ADDRESS     (0x90000ul + PAGE_OFFSET)
 
 #define FONT_WIDTH_EVERY_CHAR 0x8
 #define FONT_HEIGHT_EVERY_CHAR 0x10
@@ -117,7 +115,7 @@ int fillRect(
    u32 color;
    u8 fill1,fill2,fill3;
    const u32 xRes = currentVBEModeInfo.xResolution;
-   u8 *vram = (u8 *)(pointer)currentVBEModeInfo.physBaseAddr;
+   u8 *vram = (u8 *)pa2va(currentVBEModeInfo.physBaseAddr);
 
    vram += 3*x + 3*xRes*y;
 
@@ -180,7 +178,7 @@ static int screenUp(int numberOfLine)
 {
    if(numberOfLine == 0)
       return 0;
-   u8 *vram = (u8 *)(pointer)currentVBEModeInfo.physBaseAddr;
+   u8 *vram = (u8 *)(pointer)pa2va(currentVBEModeInfo.physBaseAddr);
    const u32 xRes = currentVBEModeInfo.xResolution;
    const u32 yRes = currentVBEModeInfo.yResolution;
    const u32 vramSize = xRes*yRes*3;

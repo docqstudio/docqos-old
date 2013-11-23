@@ -4,12 +4,9 @@
 
 #define MAX_ORDER 0xB
 
-extern u8 endAddressOfKernel; /*See also ldscripts/kernel.lds.*/
-       /*In fact,the end address of the kernel is &endAddressOfKernel,not endAddressOfKernel.*/
-       /*After this address,there is a memory map.*/
-
-static PhysicsPage *memoryMap = 
-   (PhysicsPage *)&endAddressOfKernel;
+extern void *endAddressOfKernel; /*See also ldscripts/kernel.lds.*/
+                                 /*It will init in start/cstart.c.*/
+static PhysicsPage *memoryMap = 0;
 static u64 physicsPageCount = 0;
 
 static ListHead freeList[MAX_ORDER] = {};
@@ -40,6 +37,8 @@ static inline int pageIsBuddy(PhysicsPage *page,unsigned int order)
 
 int initBuddySystem(void)
 {
+   memoryMap = (PhysicsPage *)endAddressOfKernel;
+
    physicsPageCount = getMemorySize();
    physicsPageCount += 0xfff;
    physicsPageCount >>= 3*4;
@@ -54,16 +53,12 @@ int initBuddySystem(void)
    {
       initPhysicsPage(memoryMap + i);
    }
-   printk("The last physics page address: %x,the size of physics pages: %dKB.\n",
-      memoryMap + physicsPageCount - 1,
-      physicsPageCount*sizeof(PhysicsPage)/1024 + 1);
 
-   for(ListHead *list = freeList[10].next;list != &freeList[10];list = list->next)
-   {
-      PhysicsPage *page = listEntry(list,PhysicsPage,list);
-      u64 physicsAddress = ((u64)(page - memoryMap))<<(3*4);
-      printk("%x %d\n",physicsAddress,page->data);
-   }
+   //printk("%x\n",endAddressOfKernel);
+   endAddressOfKernel += physicsPageCount*sizeof(PhysicsPage) + 1;
+   printk("The last physics page address: %x,the size of physics pages: %dKB.\n",
+      endAddressOfKernel,
+      physicsPageCount*sizeof(PhysicsPage)/1024 + 1);
 
    printk("Initialize Buddy System successfully!\n");
    return 0;

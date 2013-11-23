@@ -58,11 +58,6 @@ readKernelFailed: .ascii "Reading kernel failed!\n\r"
 canNotGetMemoryInfo: .ascii "Can't get memory info!\n\r"
           .byte 0
 
-PTEMemory: .long PAGE_START_MEMORY
-PDEMemory: .long 0x0
-PDPTEMemory: .long 0x0
-PML4EMemory: .long 0x0
-
 espSaved: .long 0x0
 eaxSaved: .long 0x0
 
@@ -545,7 +540,7 @@ callRMFunctionInPM:.code32 /*It will return to Real Mode and `call *%eax` */
 entry64: .code32
    call pagingInit
 
-   movl (PML4EMemory + LOADER_MEMORY),%eax
+   movl $KERNEL_TEMP_PML4E_DIR,%eax
    movl %eax,%cr3
 
    movl %cr4,%eax
@@ -568,66 +563,48 @@ entry64: .code32
    ljmp $selectorFlatC64,$(LOADER_MEMORY + longMode)
 
 pagingInit: .code32 /*Init long mode paging.*/ /*Only mapping 4GB memory. But now it is enough!*/
-   /*Start to init PTE.*/
-   movl (PTEMemory + LOADER_MEMORY),%eax
-   movl $((1024*1024*1024*4)/(4*1024)),%ecx
-   movl $(0 + 0x3),%edi
-1: /*label PTE loop*/
-   movl %edi,(%eax)
+   /*Init PDE.*/
+   movl $KERNEL_TEMP_PDE_DIR,%eax
+   movl $512,%ecx
+1: /*label PDE loop*/
    movl $0,4(%eax)
-   addl $0x8,%eax
-   addl $0x1000,%edi
+   movl $0,(%eax)
+   addl $8,%eax
    loop 1b
 
-   /*Start to init PDE.*/
-   movl %eax,(PDEMemory + LOADER_MEMORY)
-   movl $((1024*1024*1024*4)/(2*1024*1024)),%ecx
-   movl (PTEMemory + LOADER_MEMORY),%edi
-   addl $0x3,%edi
-2: /*label PDE loop*/
-   movl %edi,(%eax)
+   movl $KERNEL_TEMP_PDE_DIR,%eax
+   movl $(0 + 0x83),(%eax)
+   movl $(2*1024*1024 + 0x83),8(%eax)
+   movl $(4*1024*1024 + 0x83),16(%eax)
+   movl $(6*1024*1024 + 0x83),24(%eax)
+   movl $(8*1024*1024 + 0x83),32(%eax)
+
+   /*Init PDPTE.*/
+   movl $KERNEL_TEMP_PDPTE_DIR,%eax
+   movl $512,%ecx
+2: /*label PDPTE loop*/
    movl $0,4(%eax)
-   addl $0x8,%eax
-   addl $0x1000,%edi
+   movl $0,(%eax)
+   addl $8,%eax
    loop 2b
 
-   /*Start to init PDPTE.*/
-   movl %eax,(PDPTEMemory + LOADER_MEMORY)
-   movl $((1024*1024*1024*4)/(1024*1024*1024)),%ecx
-   movl (PDEMemory + LOADER_MEMORY),%edi
-   addl $0x3,%edi
-3: /*label PDPTE loop*/
-   movl %edi,(%eax)
+   movl $KERNEL_TEMP_PDPTE_DIR,%eax
+   movl $(KERNEL_TEMP_PDE_DIR + 0x03),(%eax)
+
+   /*Init PML4E.*/
+   movl $KERNEL_TEMP_PML4E_DIR,%eax
+   movl $512,%ecx
+3: /*label PML4E loop*/
    movl $0,4(%eax)
-   addl $0x8,%eax
-   addl $0x1000,%edi
+   movl $0,(%eax)
+   addl $8,%eax
    loop 3b
 
-   movl $(512 - ((1024*1024*1024*4)/(1024*1024*1024))),%ecx
-   movl $0x0,%edi
-4: /*label PDPTE empty loop*/
-   movl %edi,(%eax)
-   movl $0,4(%eax)
-   addl $0x8,%eax
-   loop 4b
+   movl $KERNEL_TEMP_PML4E_DIR,%eax
+   movl $(KERNEL_TEMP_PDPTE_DIR + 0x03),(%eax)
+   movl $(KERNEL_TEMP_PDPTE_DIR + 0x03),8(%eax)
 
-   /*Start to init PML4E.*/
-   movl %eax,(PML4EMemory + LOADER_MEMORY)
-   movl (PDPTEMemory + LOADER_MEMORY),%edi
-   addl $0x3,%edi
-   movl %edi,(%eax)
-   movl $0,4(%eax)
-   addl $0x8,%eax
-
-   movl $0x0,%edi
-   movl $(512 - 1),%ecx
-5: /*label PML4E empty loop*/
-   movl %edi,(%eax)
-   movl $0,4(%eax)
-   addl $0x8,%eax
-   loop 5b
    ret
-
 strlen:.code64 /*Get length of string %rbp*/
    movl $0,%ecx
 1:
@@ -655,13 +632,13 @@ longMode: .code64
    pushfq
    pushq $selectorFlatC64
    pushq $(2f + LOADER_MEMORY)
-   iretq /*Init cs.*/
+   iretq /*Refresh GDT.*/
 
 2: /*label next*/
    xorq %rcx,%rcx
    movl $(LOADER_MEMORY + KERNEL_MAGIC_STRING),%ebp
    call strlen
-   movq $(KERNEL_ENTRY_ADDRESS),%rax
+   movq $(KERNEL_ENTRY_ADDRESS + PAGE_OFFSET),%rax
    addq %rcx,%rax /*Now %rax is kernel's address.*/
 
 /************************************************/

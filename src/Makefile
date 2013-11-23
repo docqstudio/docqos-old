@@ -6,7 +6,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/console.o .obj/memory.o .obj/cpuid.o .obj/idt.o .obj/exception.o \
    .obj/cexception.o .obj/pic.o .obj/interrupt.o .obj/cinterrupt.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
-   .obj/kmalloc.o
+   .obj/kmalloc.o .obj/paging.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -28,18 +28,19 @@ cachedir:
 	$(AS) $(ASFLAGS) -o $@ $<
 .obj/cstart.o:init/cstart.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h \
               ../include/memory/memory.h ../include/video/console.h ../include/cpu/cpuid.h \
-	      ../include/interrupt/interrupt.h ../include/acpi/acpi.h
+	      ../include/interrupt/interrupt.h ../include/acpi/acpi.h ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
-.obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h 
+.obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h  \
+            ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/font.o:video/font.c ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/console.o:video/console.c ../include/core/const.h ../include/video/vesa.h ../include/lib/stdarg.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/memory.o:memory/memory.c ../include/core/const.h ../include/memory/memory.h ../include/video/console.h \
-              ../include/memory/buddy.h ../include/core/list.h
+              ../include/memory/buddy.h ../include/core/list.h ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/cpuid.o:cpu/cpuid.c ../include/core/const.h ../include/video/console.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -58,7 +59,8 @@ cachedir:
                   ../include/interrupt/pic.h ../include/interrupt/idt.h ../include/cpu/io.h \
 		  ../include/interrupt/localapic.h
 	$(CC) $(CFLAGS) -o $@ $<
-.obj/acpi.o:acpi/acpi.c ../include/core/const.h ../include/video/console.h ../include/acpi/acpi.h
+.obj/acpi.o:acpi/acpi.c ../include/core/const.h ../include/video/console.h ../include/acpi/acpi.h \
+            ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/localapic.o:interrupt/localapic.c ../include/core/const.h ../include/acpi/acpi.h \
                  ../include/cpu/cpuid.h ../include/video/console.h
@@ -70,10 +72,12 @@ cachedir:
              ../include/core/list.h ../include/memory/memory.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/slab.o:memory/slab.c ../include/core/const.h ../include/memory/slab.h ../include/video/console.h \
-            ../include/core/list.h ../include/memory/buddy.h
+            ../include/core/list.h ../include/memory/buddy.h ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/kmalloc.o:memory/kmalloc.c ../include/core/const.h ../include/core/list.h ../include/memory/buddy.h \
                ../include/memory/slab.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/paging.o:memory/paging.c ../include/core/const.h ../include/memory/paging.h ../include/memory/memory.h
 	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)
