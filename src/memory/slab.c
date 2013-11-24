@@ -47,6 +47,8 @@ static int slabFreePages(SlabCache *cache,PhysicsPage *page)
 static Slab *allocSlabForSlabCache(SlabCache *cache)
 {
    PhysicsPage *page = slabAllocPages(cache);
+   if(!page)
+      return 0;
    void *obj = getPhysicsPageAddress(page);
    Slab *slab = (Slab *)obj;
    slab->nextFree = 0;

@@ -8,15 +8,18 @@ SECTIONS {
       *(.magic)
       *(.text*)
    }
-
+   . = ALIGN(8);
    .rodata : {*(.rodata*)}
+   . = ALIGN(8);
    .data : {
       *(COMMON)
       *(.data)
    }
+   . = ALIGN(8);
    .bss : {
       *(.bss)
    }
+   . = ALIGN(8);
 
    endAddressOfKernel = .;
 

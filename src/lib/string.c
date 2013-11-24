@@ -20,7 +20,7 @@ void *memcpy(void *to,const void *from,int n) /*NOTE: It's easy enough,but it's 
    return to;
 }
 
-char *itoa(long val, char *buf, unsigned int radix,
+char *itoa(long long val, char *buf, unsigned int radix,
    char alignType,char alignChar,char isUnsigned)
 /* alignType = 0  no align
  * alignType > 0 align:left,complete -alignType bits with alignChar

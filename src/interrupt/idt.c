@@ -1,6 +1,7 @@
 #include <core/const.h>
 #include <interrupt/idt.h>
 #include <video/console.h>
+#include <memory/paging.h>
 
 typedef struct LongModeGate{
    u16 offset1;
@@ -22,31 +23,34 @@ typedef struct LongModeGate{
 static u8 idt[256 * sizeof(LongModeGate)];
 static u8 idtr[2 + 8];
 
-extern void (*exceptionHandlers[20])(void);
+extern void handleLocalApicTimer(void);
+extern void (*irqHandlers[IRQ_COUNT])(void);
+/*Defined in interrupt.S*/
+extern void (*exceptionHandlers[EXP_COUNT])(void);
 /*Defined in exception.S .*/
 extern void defaultInterruptHandler(void);
 /*Defined in interrupt.S .*/
 
-int setIDTGate(u8 index,u16 type, void (*handler)());
+int setIDTGate(u8 index,u16 type, void (*handler)(void));
 
 int initIDT(void)
 {
-   for(int i = 0x0;i < 20;++i)
-   {
-      setIDTGate(i,INTERRUPT_GATE_TYPE,exceptionHandlers[i - 0x0]);
-   }
-   for(int i = 20;i < 256;++i)
-   {
+   for(int i = 0;i <= 0xff;++i)
       setIDTGate(i,INTERRUPT_GATE_TYPE,defaultInterruptHandler);
-   }
 /*All gates in IDT are interrupt gates.*/
 
+   for(int i = EXP_START_INT;i < EXP_END_INT;++i)
+      setIDTGate(i,INTERRUPT_GATE_TYPE,exceptionHandlers[i - EXP_START_INT]);
+   for(int i = IRQ_START_INT;i < IRQ_END_INT;++i)
+      setIDTGate(i,INTERRUPT_GATE_TYPE,irqHandlers[i - IRQ_START_INT]);
+
+   setIDTGate(LOCAL_TIMER_INT,INTERRUPT_GATE_TYPE,handleLocalApicTimer);
+
    *(u16 *)idtr = (u16)(sizeof(idt) - 1);
-   *(u64 *)(idtr + 2) = (u64)idt; /*Init idtr.*/
+   *(u64 *)(idtr + 2) = (u64)(idt); /*Init idtr.*/
    asm("lidt (%%rax)"::"a"(idtr)); /*Load idt.*/
 
    printk("Initialize IDT successfully!\n");
-
    return 0;
 }
 
@@ -66,7 +70,7 @@ int setLongModeGate(LongModeGate *gate,u16 type, u64 base)
    return 0;
 }
 
-int setIDTGate(u8 index,u16 type,void (*handler)())
+int setIDTGate(u8 index,u16 type,void (*handler)(void))
 {
    LongModeGate *gate = (LongModeGate *)(idt + sizeof(LongModeGate)*index);
    if(handler)

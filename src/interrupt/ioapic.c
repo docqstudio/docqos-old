@@ -1,6 +1,7 @@
 #include <core/const.h>
 #include <interrupt/ioapic.h>
 #include <interrupt/localapic.h>
+#include <interrupt/idt.h>
 #include <acpi/acpi.h>
 #include <video/console.h>
 
@@ -11,6 +12,8 @@
 #define IOREDTBL            0x10
 
 static u8 *ioApicAddress = 0;
+
+static u8 irqCount = 0;
 
 static inline u32 ioApicIn(u8 reg) __attribute__ ((always_inline));
 static inline int ioApicOut(u8 reg,u32 data) __attribute__ ((always_inline)) ;
@@ -28,14 +31,14 @@ static inline int ioApicOut(u8 reg,u32 data)
    return 0;
 }
 
-int ioApicSetIRQData(u8 irq,u64 data)
+static int ioApicSetIRQData(u8 irq,u64 data)
 {
    ioApicOut(IOREDTBL + irq * 2,(u32)data);
    ioApicOut(IOREDTBL + irq * 2 + 1,(u32)(data >> 32));
    return 0;
 }
 
-int ioApicSetIRQ(u8 irq,u8 interruptVector,u8 localApicID,u8 disable)
+static int ioApicSetIRQ(u8 irq,u8 interruptVector,u8 localApicID,u8 disable)
 {
    if(interruptVector)
    {
@@ -47,6 +50,26 @@ int ioApicSetIRQ(u8 irq,u8 interruptVector,u8 localApicID,u8 disable)
    {
       ioApicSetIRQData(irq,1 << 16);
    }
+   return 0;
+}
+
+int ioApicEnableIRQ(u8 irq)
+{
+   if(irq >= irqCount)
+      return -1;
+   u32 data = ioApicIn(IOREDTBL + irq * 2);
+   data &= ~(1 << 16);
+   ioApicOut(IOREDTBL + irq * 2,data);
+   return 0;
+}
+
+int ioApicDisableIRQ(u8 irq)
+{
+   if(irq >= irqCount)
+      return -1;
+   u32 data = ioApicIn(IOREDTBL + irq * 2);
+   data |= 1 << 16;
+   ioApicOut(IOREDTBL + irq * 2,data);
    return 0;
 }
 
@@ -62,9 +85,11 @@ int initIOApic(void)
    u8 localApicID = getLocalApicID();
    printk("I/O Apic IRQ counts = %d.\n",count);
 
+   count = (IRQ_COUNT > count)?count:IRQ_COUNT; /*Min!*/
+   irqCount = count;
    for(int i = 0;i < count;++i)
    {
-      ioApicSetIRQ(i,i + 0x20,localApicID,1 /*Disable.*/);
+      ioApicSetIRQ(i,i + IRQ_START_INT,localApicID,1 /*Disable.*/);
    }
 
    printk("Initialize I/O Apic successfully.\n");

@@ -6,7 +6,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/console.o .obj/memory.o .obj/cpuid.o .obj/idt.o .obj/exception.o \
    .obj/cexception.o .obj/pic.o .obj/interrupt.o .obj/cinterrupt.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
-   .obj/kmalloc.o .obj/paging.o
+   .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -28,7 +28,8 @@ cachedir:
 	$(AS) $(ASFLAGS) -o $@ $<
 .obj/cstart.o:init/cstart.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h \
               ../include/memory/memory.h ../include/video/console.h ../include/cpu/cpuid.h \
-	      ../include/interrupt/interrupt.h ../include/acpi/acpi.h ../include/memory/paging.h
+	      ../include/interrupt/interrupt.h ../include/acpi/acpi.h ../include/memory/paging.h \
+	      ../include/time/time.h ../include/time/localtime.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -63,10 +64,10 @@ cachedir:
             ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/localapic.o:interrupt/localapic.c ../include/core/const.h ../include/acpi/acpi.h \
-                 ../include/cpu/cpuid.h ../include/video/console.h
+                 ../include/cpu/cpuid.h ../include/video/console.h ../include/interrupt/idt.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/ioapic.o:interrupt/ioapic.c ../include/core/const.h ../include/acpi/acpi.h ../include/video/console.h \
-              ../include/interrupt/ioapic.h ../include/interrupt/localapic.h
+              ../include/interrupt/ioapic.h ../include/interrupt/localapic.h ../include/interrupt/idt.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/buddy.o:memory/buddy.c ../include/core/const.h ../include/memory/buddy.h ../include/video/console.h \
              ../include/core/list.h ../include/memory/memory.h
@@ -78,6 +79,16 @@ cachedir:
                ../include/memory/slab.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/paging.o:memory/paging.c ../include/core/const.h ../include/memory/paging.h ../include/memory/memory.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/hpet.o:time/hpet.c ../include/core/const.h ../include/memory/paging.h ../include/time/hpet.h \
+            ../include/video/console.h ../include/acpi/acpi.h ../include/lib/string.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/time.o:time/time.c ../include/core/const.h ../include/time/time.h ../include/time/hpet.h \
+            ../include/video/console.h ../include/interrupt/interrupt.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/localtime.o:time/localtime.c ../include/core/const.h ../include/interrupt/interrupt.h \
+                 ../include/time/localtime.h ../include/video/console.h ../include/interrupt/localapic.h \
+		 ../include/cpu/io.h
 	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)

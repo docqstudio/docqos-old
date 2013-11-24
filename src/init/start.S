@@ -12,7 +12,6 @@ _start:
 
    callq kmain
 
-   cli
 0:
    hlt
    jmp 0b

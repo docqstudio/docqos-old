@@ -12,7 +12,7 @@
 #define MEMORY_INFO_ADDRESS        (0x70010ul + PAGE_OFFSET)
 #define MEMORY_INFO_MAX_NUMBER     15
 
-extern u8 endAddressOfKernel; /*Defined in ldscripts/kernel.lds.*/
+extern void *endAddressOfKernel; /*Defined in ldscripts/kernel.lds.*/
 
 static MemoryARDS memoryInformation[MEMORY_INFO_MAX_NUMBER] = {};
 static u32 memoryInformationNumber = 0;
@@ -23,8 +23,7 @@ static int parseMemoryInformation(void)
    u32 startPageIndex,endPageIndex;
    u64 base,limit;
    PhysicsPage *memoryMap = getMemoryMap();
-   pointer endOfKernel = 
-      (pointer)(&endAddressOfKernel + getPhysicsPageCount()*sizeof(PhysicsPage) + 1);
+   pointer endOfKernel = (pointer)endAddressOfKernel;
    endOfKernel = va2pa(endOfKernel);
    for(int i = 0;i < memoryInformationNumber; ++i)
    {
