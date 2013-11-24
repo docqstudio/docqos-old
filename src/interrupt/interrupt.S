@@ -2,8 +2,6 @@
 .global irqHandlers
 .global handleLocalApicTimer
 
-.extern localApicSendEOI
-.extern localApicTimerHandler
 .extern doIRQ
 .extern printk
 
@@ -101,13 +99,7 @@ handleLocalApicTimer:
    pushq $0xfe
    SAVE_ALL
 
-   call localApicSendEOI
-
-   movabs $localApicTimerHandler,%rax
-   movq (%rax),%rax
-   cmpq $0,%rax
-   je 1f /*Check if we have a handler.*/
-   call *%rax
+   call doIRQ
 
 1:
    RESTORE_ALL

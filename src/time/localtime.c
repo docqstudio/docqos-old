@@ -6,72 +6,69 @@
 #include <time/time.h>
 #include <video/console.h>
 
-int (*localApicTimerHandler)(IRQRegisters reg) = 0;
+IRQHandler localApicTimerHandler = 0;
 
-static volatile int happen = 1;                  /*\ */
-                                                 /*| Only use in kernel init.*/
-static int calcFreqInterrupt(IRQRegisters reg)   /*/ */
+#define END_LOOPS                  20
+
+static volatile int loops = 0;                   /* \ */
+static unsigned long long startTicks = 0;        /* | */
+static unsigned long long endTicks   = 0;        /* | Only use in kernel init.*/
+                                                 /* | */
+static int calcFreqInterrupt(IRQRegisters *reg)   /* / */
 {
-   happen = 0;
+   switch(loops)
+   {
+   case 0:
+      startTicks = getTicks();
+      break;
+   case END_LOOPS - 1:
+      endTicks = getTicks();
+      break;
+   }
+   ++loops;
+   printk(".");
    return 0;
 }
 
-static int localTimeInterrupt(IRQRegisters reg)
+static int localTimeInterrupt(IRQRegisters *reg)
 {
    return 0;
 }
 
 int initLocalTime(void)
 {
-   happen = 1;
+   printk("Calculate Local Apic Information.");
+
    localApicTimerHandler = calcFreqInterrupt;
-   unsigned int temp;
-   volatile unsigned long long ticks = getTicks();
+   loops = 0;
+
    setupLocalApicTimer(0,0xffffff);
-
    startInterrupt();
-   while(happen);
+   while(loops != END_LOOPS)
+      asm("hlt"); 
+      /*Wait for local APIC timer interrupt END_LOOPS times.*/
    closeInterrupt();
+   setupLocalApicTimer(1,0); /*Disable.*/
 
-   ticks = (getTicks() - ticks);
-   setupLocalApicTimer(1,0x100);
+   u32 ticks = endTicks - startTicks;
+   ticks /= END_LOOPS;
    if(!ticks)
    {
-      printkInColor(0xff,0x00,0x00,"Init Local Apic Timer Failed!\n");
+      printkInColor(0xff,0x00,0x00,"Local APIC Timer count too quick!!!\n");
       return -1;
    }
-
-   ticks *= MSEC_PER_SEC / TIMER_HZ;
    ticks = 0xffffff / ticks;
-   printk("Setup Local Apic Timer:Time => %d\n",ticks);
    if(!ticks)
    {
-      printkInColor(0xff,0x00,0x00,"Local Apic Timer count too slow!\n");
+      printkInColor(0xff,0x00,0x00,"Local APIC Timer count too slow!!!!\n");
       return -1;
    }
+   printk("\nTicks: %d\n",ticks);
 
-   printk("Test Local Apic Timer again...\n");
-
-   happen = 1;
-   temp = ticks;
-   ticks = getTicks();
-   setupLocalApicTimer(0,temp);
-
-   startInterrupt();
-   while(happen);
-   closeInterrupt();
-
-
-   ticks = (getTicks() - ticks);
-
-   if(ticks > 3)
-   {
-      printkInColor(0xff,0x00,0x00,"Local Apic Timer count too quick!");
-      return -1;
-   }
    localApicTimerHandler = localTimeInterrupt;
-   setupLocalApicTimer(0,temp); /*Enable and return.*/
-
+   setupLocalApicTimer(0x0,ticks);/*Enable.*/
+   
    printkInColor(0x00,0xff,0x00,"Initialize Local Apic Timer successfully!");
+
    return 0;
 }

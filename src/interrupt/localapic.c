@@ -35,6 +35,10 @@ static inline int localApicOut(u32 reg,u32 data)
 int setupLocalApicTimer(int disable,u32 time)
 /*Disable Local Apic Timer if interruptVector == 0.*/
 {
+   if(!time)
+      time = localApicIn(LOCAL_APIC_TICR);
+      /*There will have some errors if we only write LOCAL_APIC_IVT.*/
+      /*Such as virtualbox.*/
    localApicOut(LOCAL_APIC_TDCR,0x3);
    localApicOut(LOCAL_APIC_TICR,time);
    localApicOut(LOCAL_APIC_LVT,

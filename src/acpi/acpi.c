@@ -130,6 +130,8 @@ static int parseHpet(ACPIHeaderHpet *hpet)
    itoa(address,temp + 2,0x10,16,'0',1);
    printk("\nFound HPET:Address => %s,Min Tick In Periodic Mode => %d.\n",
       temp,t);
+
+   printk("\n");
    return 0;
 }
 
