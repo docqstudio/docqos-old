@@ -128,7 +128,6 @@ int initMemory(void)
    initSlab();
    
    initKMalloc();
-   printk("1");
    printk("Try to use kmalloc.....\n");
 
    void *obj1 = kmalloc(48);

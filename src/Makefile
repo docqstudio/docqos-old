@@ -6,7 +6,8 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/console.o .obj/memory.o .obj/cpuid.o .obj/idt.o .obj/exception.o \
    .obj/cexception.o .obj/pic.o .obj/interrupt.o .obj/cinterrupt.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
-   .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o
+   .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
+   .obj/pit.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -89,6 +90,9 @@ cachedir:
 .obj/localtime.o:time/localtime.c ../include/core/const.h ../include/interrupt/interrupt.h \
                  ../include/time/localtime.h ../include/video/console.h ../include/interrupt/localapic.h \
 		 ../include/cpu/io.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/pit.o:time/pit.c ../include/core/const.h ../include/interrupt/interrupt.h ../include/cpu/io.h \
+           ../include/video/console.h ../include/time/pit.h
 	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)

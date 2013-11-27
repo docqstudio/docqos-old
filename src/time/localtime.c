@@ -50,6 +50,7 @@ int initLocalTime(void)
    closeInterrupt();
    setupLocalApicTimer(1,0); /*Disable.*/
 
+   printk("\n");
    u32 ticks = endTicks - startTicks;
    ticks /= END_LOOPS;
    if(!ticks)
@@ -63,7 +64,7 @@ int initLocalTime(void)
       printkInColor(0xff,0x00,0x00,"Local APIC Timer count too slow!!!!\n");
       return -1;
    }
-   printk("\nTicks: %d\n",ticks);
+   printk("Ticks: %d\n",ticks);
 
    localApicTimerHandler = localTimeInterrupt;
    setupLocalApicTimer(0x0,ticks);/*Enable.*/

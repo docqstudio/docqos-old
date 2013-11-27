@@ -42,7 +42,7 @@ static int ioApicSetIRQ(u8 irq,u8 interruptVector,u8 localApicID,u8 disable)
 {
    if(interruptVector)
    {
-      u64 data = (u64)interruptVector | ((u64)localApicID)<< 56;
+      u64 data = (u64)interruptVector | ((u64)localApicID) << 56;
       if(disable)
          data |= 1 << 16;
       ioApicSetIRQData(irq,data);
@@ -57,7 +57,7 @@ int ioApicEnableIRQ(u8 irq)
 {
    if(irq >= irqCount)
       return -1;
-   u32 data = ioApicIn(IOREDTBL + irq * 2);
+   u32 data = ioApicIn(IOREDTBL + irq * 2); 
    data &= ~(1 << 16);
    ioApicOut(IOREDTBL + irq * 2,data);
    return 0;
@@ -67,8 +67,8 @@ int ioApicDisableIRQ(u8 irq)
 {
    if(irq >= irqCount)
       return -1;
-   u32 data = ioApicIn(IOREDTBL + irq * 2);
-   data |= 1 << 16;
+   u32 data = ioApicIn(IOREDTBL + irq * 2); 
+   data |= (1 << 16);
    ioApicOut(IOREDTBL + irq * 2,data);
    return 0;
 }
@@ -89,7 +89,7 @@ int initIOApic(void)
    irqCount = count;
    for(int i = 0;i < count;++i)
    {
-      ioApicSetIRQ(i,i + IRQ_START_INT,localApicID,1 /*Disable.*/);
+      ioApicSetIRQ(i,i + IRQ_START_INT,localApicID,0 /*Disable.*/);
    }
 
    printk("Initialize I/O Apic successfully.\n");

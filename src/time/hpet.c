@@ -145,6 +145,7 @@ int initHpet(IRQHandler handler,unsigned int hz)
    hpetAddress = getHpetAddress();
    if(!hpetAddress)
       return -1;
+      /*Then we will use PIT,so we should not print this error.*/
    u32 period = hpetIn(HPET_PERIOD_REG);
 
    printk("HPET Period:%d,",period); 

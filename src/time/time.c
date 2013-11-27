@@ -1,6 +1,7 @@
 #include <core/const.h>
 #include <time/time.h>
 #include <time/hpet.h>
+#include <time/pit.h>
 #include <interrupt/interrupt.h>
 #include <video/console.h>
 
@@ -15,11 +16,9 @@ static int timeInterrupt(IRQRegisters *reg)
 int initTime(void)
 {
    if(initHpet(timeInterrupt,TIMER_HZ))
-   {
-      printkInColor(0xff,0x00,0x00,"No support for HPET,discard.");
-      /*We will support PIT next version.*/
-      return -1;
-   }
+      if(initPit(timeInterrupt,TIMER_HZ))
+         return -1;
+
    printkInColor(0x00,0xff,0x00,"Initialize time successfully!\n\n");
    return 0;
 }
