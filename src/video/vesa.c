@@ -1,5 +1,7 @@
 #include <video/vesa.h>
 #include <core/const.h>
+#include <cpu/spinlock.h>
+#include <cpu/io.h>
 #include <lib/string.h>
 #include <memory/paging.h>
 
@@ -96,7 +98,9 @@ extern u8 fontASC16[];
 
 static VBEInfo currentVBEInfo = {};
 static VBEModeInfo currentVBEModeInfo = {};
+
 static u32 displayPosition = 0;
+static SpinLock displayPositionLock = {};
 
 int initVESA(void)
 {
@@ -106,6 +110,10 @@ int initVESA(void)
    memcpy((void *) &currentVBEModeInfo,/*to*/
       (const void *) (VBE_MODE_INFO_ADDRESS), /*from*/
       sizeof(VBEModeInfo)); /*n*/
+      
+
+   initSpinLock(&displayPositionLock);  
+
    return 0; /*Successful.*/
 }
 
@@ -200,6 +208,12 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
    char c;
    const u32 xRes = currentVBEModeInfo.xResolution;
    const u32 yRes = currentVBEModeInfo.yResolution;
+
+   u64 rflags;
+   lockSpinLockDisableInterrupt(&displayPositionLock,&rflags);
+   /*In fact,here will do lots of memory operations,so we shouldn't use spin lock.*/
+   /*But we don't have any better ways now.*/
+
    int x = displayPosition % xRes;
    int y = displayPosition / xRes;
 
@@ -246,5 +260,8 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
    }
 
    displayPosition = y * xRes + x; /*Update the next display position.*/
+
+   unlockSpinLockRestoreInterrupt(&displayPositionLock,&rflags);
+
    return 0;
 }

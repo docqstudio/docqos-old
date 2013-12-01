@@ -17,5 +17,5 @@ inline int drawPoint(u8 red,u8 green,u8 blue,int x,int y){
 }
 
 inline int writeString(const char *string){
-   return writeStringInColor(0xFF,0xFF,0xFF,string);
+   return writeStringInColor(0xff,0xff,0xff,string);
 }

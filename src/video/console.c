@@ -24,7 +24,7 @@ int printk(const char *string, ...)
    varArgsStart(list,string);
    ret = (int)(vsprintk(buf,string,list) - buf);
    varArgsEnd(list);
-   writeString(buf);
+   writeStringInColor(0xff,0xff,0xff,buf);
    return ret;
 }
 char *vsprintk(char *buf,const char *string,VarArgsList list) 

@@ -7,7 +7,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/cexception.o .obj/pic.o .obj/interrupt.o .obj/cinterrupt.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
-   .obj/pit.o
+   .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -30,12 +30,15 @@ cachedir:
 .obj/cstart.o:init/cstart.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h \
               ../include/memory/memory.h ../include/video/console.h ../include/cpu/cpuid.h \
 	      ../include/interrupt/interrupt.h ../include/acpi/acpi.h ../include/memory/paging.h \
-	      ../include/time/time.h ../include/time/localtime.h
+	      ../include/time/time.h ../include/time/localtime.h ../include/cpu/gdt.h \
+	      ../include/task/task.h ../include/core/list.h ../include/cpu/spinlock.h \
+              ../include/cpu/spinlock_types.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h  \
-            ../include/memory/paging.h
+            ../include/memory/paging.h ../include/cpu/spinlock.h ../include/cpu/io.h ../include/task/task.h \
+            ../include/cpu/spinlock_types.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/font.o:video/font.c ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -94,6 +97,15 @@ cachedir:
 .obj/pit.o:time/pit.c ../include/core/const.h ../include/interrupt/interrupt.h ../include/cpu/io.h \
            ../include/video/console.h ../include/time/pit.h
 	$(CC) $(CFLAGS) -o $@ $<
+.obj/gdt.o:cpu/gdt.c ../include/core/const.h ../include/cpu/gdt.h ../include/video/console.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/task.o:task/task.c ../include/core/const.h ../include/cpu/io.h ../include/task/task.h \
+            ../include/video/console.h ../include/core/list.h ../include/cpu/spinlock.h \
+	    ../include/memory/buddy.h ../include/cpu/atomic.h ../include/lib/string.h \
+	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/fork.o:task/fork.S
+	$(AS) $(ASFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)
 	$(TOBINARY) $(TARGET) $(TARGET)

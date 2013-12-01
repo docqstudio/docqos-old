@@ -5,29 +5,18 @@
 #include <memory/paging.h>
 #include <lib/string.h>
 #include <cpu/cpuid.h>
+#include <cpu/gdt.h>
 #include <acpi/acpi.h>
 #include <interrupt/interrupt.h>
 #include <time/time.h>
 #include <time/localtime.h>
-
-#define GDT_SIZE (6*8)
-
-static u8 gdtr64[2 + 8] = {};
-/*2: word limit,8: qword base.*/
-static u8 gdt64[GDT_SIZE] = {};
+#include <task/task.h>
 
 extern void *endAddressOfKernel;
 
 int kmain(void)
 {
    endAddressOfKernel = (void *)(&endAddressOfKernel);
-   
-   asm volatile("sgdt (%%rax)"::"a" (gdtr64):"memory");
-   memcpy((void *)gdt64,
-      (const void *)pa2va(*(u64 *)(gdtr64 + 2)),
-      GDT_SIZE);
-   *(u64 *)(gdtr64 + 2) = (u64)gdt64;
-   asm volatile("lgdt (%%rax)"::"a" (gdtr64):"memory");
 
    initPaging();
 
@@ -37,10 +26,14 @@ int kmain(void)
       "------------------kmain started------------------\n");
    printk("Initialize VESA successfully.\n");
 
+   initGDT();
+
    if(initMemory()) 
       return -1; /*Error!*/
 
    displayCPUBrand();
+
+   printk("s");
 
    if(initACPI())
       return -1;
@@ -51,5 +44,6 @@ int kmain(void)
       return -1;
    if(initLocalTime())
       return -1;
+   initTask();
    return 0;
 }

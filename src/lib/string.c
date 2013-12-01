@@ -20,6 +20,55 @@ void *memcpy(void *to,const void *from,int n) /*NOTE: It's easy enough,but it's 
    return to;
 }
 
+void *memset(void *mem,u8 c,u64 len)
+{
+   if(len >= 8)
+   {
+      u64 *mem64;
+      u64 fill = c;
+      fill |= fill << 8;
+      fill |= fill << 16;
+      fill |= fill << 32;
+
+      while((pointer)mem % 8)
+      {
+         *((u8 *)mem) = c;
+	 mem += 1;
+	 len -= 1;
+      }
+
+      mem64 = (u64 *)mem;
+      u64 loop = len / 64;
+      while(loop > 0)
+      {
+         mem64[0] = mem64[1] = mem64[2] = mem64[3]
+	    = mem64[4] = mem64[5] = mem64[6] = mem64[7] = fill;
+	 mem += 8;
+         loop -= 1;
+      }
+      len %= 64;
+
+      loop = len / 8;
+      while(loop > 0)
+      {
+         mem64[0] = fill;
+	 mem64 += 1;
+	 loop -= 1;
+      }
+      len %= 8;
+
+      mem = (u8 *)mem64;
+   }
+
+   while(len > 0)
+   {
+      *(u8 *)mem = c;
+      --len;
+      ++mem;
+   }
+   return mem;
+}
+
 char *itoa(long long val, char *buf, unsigned int radix,
    char alignType,char alignChar,char isUnsigned)
 /* alignType = 0  no align

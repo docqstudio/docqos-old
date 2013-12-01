@@ -6,6 +6,7 @@
 #include <interrupt/idt.h>
 #include <interrupt/localapic.h>
 #include <interrupt/ioapic.h>
+#include <task/task.h>
 
 extern IRQHandler localApicTimerHandler;
 
@@ -16,6 +17,7 @@ static IRQHandler irqHandlerTable[IRQ_COUNT] = {
 int doIRQ(IRQRegisters reg)
 {
    localApicSendEOI(); /*Send EOI to local APIC.*/
+   int ret;
 
    switch(reg.irq)
    {
@@ -25,7 +27,7 @@ int doIRQ(IRQRegisters reg)
          return 0;
       startInterrupt();
       
-      localApicTimerHandler(&reg);
+      ret = localApicTimerHandler(&reg);
 
       closeInterrupt();
       setupLocalApicTimer(0,0); /*Enable.*/
@@ -37,13 +39,18 @@ int doIRQ(IRQRegisters reg)
          return 0; /*We needn't to enable this IRQ,it should be disabled.*/
       startInterrupt();
 
-      (irqHandlerTable[reg.irq])(&reg);
+      ret = (irqHandlerTable[reg.irq])(&reg);
    
       closeInterrupt();
       ioApicEnableIRQ((u8)reg.irq); /*Enable this irq.*/
       break;
    }
-   return 0;
+   if(ret == 1)/*Need schedule.*/
+   {
+      schedule();
+      closeInterrupt();
+   }
+   return ret;
 }
 
 int requestIRQ(u8 irq,IRQHandler handler)

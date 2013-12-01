@@ -89,7 +89,7 @@ int initIOApic(void)
    irqCount = count;
    for(int i = 0;i < count;++i)
    {
-      ioApicSetIRQ(i,i + IRQ_START_INT,localApicID,0 /*Disable.*/);
+      ioApicSetIRQ(i,i + IRQ_START_INT,localApicID,1 /*Disable.*/);
    }
 
    printk("Initialize I/O Apic successfully.\n");

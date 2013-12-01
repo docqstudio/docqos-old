@@ -4,6 +4,7 @@
 #include <time/pit.h>
 #include <interrupt/interrupt.h>
 #include <video/console.h>
+#include <task/task.h>
 
 static unsigned long long ticks = 0;
 

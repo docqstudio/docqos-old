@@ -32,7 +32,7 @@ static int calcFreqInterrupt(IRQRegisters *reg)   /* / */
 
 static int localTimeInterrupt(IRQRegisters *reg)
 {
-   return 0;
+   return 1;/*Schedule.*/
 }
 
 int initLocalTime(void)
@@ -69,7 +69,7 @@ int initLocalTime(void)
    localApicTimerHandler = localTimeInterrupt;
    setupLocalApicTimer(0x0,ticks);/*Enable.*/
    
-   printkInColor(0x00,0xff,0x00,"Initialize Local Apic Timer successfully!");
+   printkInColor(0x00,0xff,0x00,"Initialize Local Apic Timer successfully!\n");
 
    return 0;
 }
