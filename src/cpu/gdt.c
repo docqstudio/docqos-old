@@ -54,7 +54,7 @@ typedef struct TaskStateSegment{
 } __attribute__ ((packed)) TaskStateSegment;
 
 /*See also https://sparrow.ece.cmu.edu/group/731-s07/readings/amd2_24593.pdf */
-/*Note: sizeof(GDTSystemDescriptor) = 64 ,but sizeof(TaskStateSegment) = 32.*/
+/*Note: sizeof(GDTSystemDescriptor) = 64 ,but sizeof(GDTDescriptor) = 32.*/
 
 #define GDT_SIZE ((10 + 1) * sizeof(GDTDescriptor))
 

@@ -11,12 +11,14 @@
 #include <time/time.h>
 #include <time/localtime.h>
 #include <task/task.h>
+#include <driver/driver.h>
+#include <driver/pci.h>
 
 extern void *endAddressOfKernel;
 
 int kmain(void)
 {
-   endAddressOfKernel = (void *)(&endAddressOfKernel);
+   endAddressOfKernel = (void *)(&endAddressOfKernel + 1);
 
    initPaging();
 
@@ -33,10 +35,13 @@ int kmain(void)
 
    displayCPUBrand();
 
-   printk("s");
+   initDriver();
 
    if(initACPI())
       return -1;
+   if(initPCI())
+      return -1;
+
    if(initInterrupt())
       return -1;
 

@@ -4,9 +4,13 @@
 
 inline u8 inb(u16 port) __attribute__ ((always_inline));
 inline int outb(u16 port,u8 data) __attribute__ ((always_inline));
+inline u16 inw(u16 port) __attribute__ ((always_inline));
+inline int outw(u16 port,u16 data) __attribute__ ((always_inline));
+inline u32 inl(u16 port) __attribute__ ((always_inline));
+inline int outl(u16 port,u32 data) __attribute__ ((always_inline));
 
-inline int closeInterrupt() __attribute__ ((always_inline));
-inline int startInterrupt() __attribute__ ((always_inline));
+inline int closeInterrupt(void) __attribute__ ((always_inline));
+inline int startInterrupt(void) __attribute__ ((always_inline));
 inline u64 storeInterrupt(void) __attribute__ ((always_inline));
 inline int restoreInterrupt(u64 rflags) __attribute__ ((always_inline));
 
@@ -22,14 +26,38 @@ inline int outb(u16 port,u8 data)
    asm volatile("outb %%al,%%dx"::"a"(data),"d"(port));
    return 0;
 }
+inline u16 inw(u16 port)
+{
+   u16 data;
+   asm volatile("inw %%dx,%%ax":"=a"(data):"d"(port));
+   return data;
+}
+inline int outw(u16 port,u16 data)
+{
+   asm volatile("outw %%ax,%%dx"::"a"(data),"d"(port));
+   return 0;
+}
 
-inline int closeInterrupt()
+inline u32 inl(u16 port)
+{
+   u32 data;
+   asm volatile("inl %%dx,%%eax":"=a"(data):"d"(port));
+   return data;
+}
+
+inline int outl(u16 port,u32 data)
+{
+   asm volatile("outl %%eax,%%dx"::"a"(data),"d"(port));
+   return 0;
+}
+
+inline int closeInterrupt(void)
 {
    asm volatile("cli");
    return 0;
 }
 
-inline int startInterrupt()
+inline int startInterrupt(void)
 {
    asm volatile("sti");
    return 0;

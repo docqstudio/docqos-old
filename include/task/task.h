@@ -68,6 +68,6 @@ inline int disablePreemption(void)
 {
    Task *current = getCurrentTask();
    if(current)
-     ++getCurrentTask()->preemption;
+     ++current->preemption;
    return 0;
 }

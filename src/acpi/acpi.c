@@ -25,7 +25,7 @@ typedef struct ACPIAddressFormat{
    u64 address;
 } __attribute__ ((packed)) ACPIAddressFormat;
 
-/******************************************/
+/*************************************************/
 
 typedef struct ACPIHeaderApic{
    ACPIHeader header;
@@ -131,7 +131,6 @@ static int parseHpet(ACPIHeaderHpet *hpet)
    printk("\nFound HPET:Address => %s,Min Tick In Periodic Mode => %d.\n",
       temp,t);
 
-   printk("\n");
    return 0;
 }
 

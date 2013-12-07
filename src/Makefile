@@ -7,7 +7,8 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/cexception.o .obj/pic.o .obj/interrupt.o .obj/cinterrupt.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
-   .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o
+   .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
+   .obj/pci.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -32,7 +33,7 @@ cachedir:
 	      ../include/interrupt/interrupt.h ../include/acpi/acpi.h ../include/memory/paging.h \
 	      ../include/time/time.h ../include/time/localtime.h ../include/cpu/gdt.h \
 	      ../include/task/task.h ../include/core/list.h ../include/cpu/spinlock.h \
-              ../include/cpu/spinlock_types.h
+              ../include/cpu/spinlock_types.h ../include/driver/driver.h ../include/driver/pci.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -68,10 +69,12 @@ cachedir:
             ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/localapic.o:interrupt/localapic.c ../include/core/const.h ../include/acpi/acpi.h \
-                 ../include/cpu/cpuid.h ../include/video/console.h ../include/interrupt/idt.h
+                 ../include/cpu/cpuid.h ../include/video/console.h ../include/interrupt/idt.h \
+		 ../include/driver/driver.h ../include/core/list.h ../include/cpu/spinlock_types.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/ioapic.o:interrupt/ioapic.c ../include/core/const.h ../include/acpi/acpi.h ../include/video/console.h \
-              ../include/interrupt/ioapic.h ../include/interrupt/localapic.h ../include/interrupt/idt.h
+              ../include/interrupt/ioapic.h ../include/interrupt/localapic.h ../include/interrupt/idt.h \
+	      ../include/driver/driver.h ../include/core/list.h ../include/cpu/spinlock_types.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/buddy.o:memory/buddy.c ../include/core/const.h ../include/memory/buddy.h ../include/video/console.h \
              ../include/core/list.h ../include/memory/memory.h
@@ -85,7 +88,8 @@ cachedir:
 .obj/paging.o:memory/paging.c ../include/core/const.h ../include/memory/paging.h ../include/memory/memory.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/hpet.o:time/hpet.c ../include/core/const.h ../include/memory/paging.h ../include/time/hpet.h \
-            ../include/video/console.h ../include/acpi/acpi.h ../include/lib/string.h
+            ../include/video/console.h ../include/acpi/acpi.h ../include/lib/string.h ../include/driver/driver.h \
+	    ../include/core/list.h ../include/cpu/spinlock_types.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/time.o:time/time.c ../include/core/const.h ../include/time/time.h ../include/time/hpet.h \
             ../include/video/console.h ../include/interrupt/interrupt.h
@@ -106,6 +110,13 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/fork.o:task/fork.S
 	$(AS) $(ASFLAGS) -o $@ $<
+.obj/driver.o:driver/driver.c ../include/core/const.h ../include/driver/driver.h ../include/core/list.h \
+              ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/pci.o:driver/pci.c ../include/driver/driver.h ../include/core/const.h ../include/driver/pci.h \
+           ../include/video/console.h ../include/cpu/io.h ../include/memory/kmalloc.h ../include/core/list.h \
+	   ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h
+	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)
 	$(TOBINARY) $(TARGET) $(TARGET)
