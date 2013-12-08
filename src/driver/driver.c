@@ -23,10 +23,10 @@ int registerDevice(Device *device)
       if(driver->probe(device) == 0) 
       {
          if(driver->enable(device))
-	    continue; /*Continue if error.*/
-	 device->driver = driver;
+            continue; /*Continue if error.*/
+         device->driver = driver;
          unlockSpinLock(&driverLock);
-	 return 0;
+         return 0;
       }
    }
    unlockSpinLock(&driverLock);

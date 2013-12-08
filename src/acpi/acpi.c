@@ -93,25 +93,25 @@ static int parseApic(ACPIHeaderApic *apic)
       {
       case APIC_TYPE_LOCAL_APIC:
          {
-	    LocalApic *localApic = (LocalApic *)apicHeader;
-	    printk("Found CPU: Processor ID => %d, Apic ID => %d \n",
-	       (int)localApic->apicProcessorID,(int)localApic->apicID);
+            LocalApic *localApic = (LocalApic *)apicHeader;
+            printk("Found CPU: Processor ID => %d, Apic ID => %d \n",
+               (int)localApic->apicProcessorID,(int)localApic->apicID);
             break;
-	 }
+         }
       case APIC_TYPE_IO_APIC:
          {
-	    IOApic *ioApic = (IOApic *)apicHeader;
-	    itoa(ioApic->ioApicAddress,temp + 2,0x10,8,'0',1);
+            IOApic *ioApic = (IOApic *)apicHeader;
+            itoa(ioApic->ioApicAddress,temp + 2,0x10,8,'0',1);
             printk("Found I/O Apic : I/O Apic ID => %d, I/O Apic Address => %s\n",
-	       (int)ioApic->ioApicID,temp);
-	    ioApicAddress = (u8 *)pa2va(ioApic->ioApicAddress);
+               (int)ioApic->ioApicID,temp);
+            ioApicAddress = (u8 *)pa2va(ioApic->ioApicAddress);
             break;
-	 }
+         }
       case APIC_TYPE_INTERRUPT_OVERRIDE:
          break;
       default:
          printk("Unknow Apic information type:%d,length:%d.\n",(int)type,(int)length);
-	 break;
+         break;
       }
       start += length;
    }
@@ -241,9 +241,9 @@ int initACPI(void)
       if(signature == *(const u64 *)"RSD PTR ")
       {
          if(parseRSDP(start) == 0)
-	 {
-	    return 0;
-	 }
+         {
+            return 0;
+         }
       }
       start += 0x10;
    }
@@ -256,9 +256,9 @@ int initACPI(void)
       if(signature == *(const u64 *)"RSD PTR ")
       {
          if(parseRSDP(ebda) == 0)
-	 {
-	    return 0;
-	 }
+         {
+            return 0;
+         }
       }
    }
 

@@ -106,21 +106,21 @@ PhysicsPage *allocPages(unsigned int order)
       if(!listEmpty(&freeList[currentOrder]))
       {
          page = listEntry(freeList[currentOrder].next,PhysicsPage,list);
-	 ++page->count;
-	 page->flags &= ~PageData;
-	 page->data = 0;
-	 listDelete(&page->list);
-	 size = 1ul << currentOrder;
+         ++page->count;
+         page->flags &= ~PageData;
+         page->data = 0;
+         listDelete(&page->list);
+         size = 1ul << currentOrder;
          while(currentOrder > order)
-	 {
-	    --currentOrder;
-	    size >>= 1;
+         {
+            --currentOrder;
+            size >>= 1;
             buddy = page + size;
-	    listAddTail(&buddy->list,&freeList[currentOrder]);
-	    buddy->flags |= PageData;
-	    buddy->data = currentOrder;
-	 } /*Split the page.*/
-	 return page;
+            listAddTail(&buddy->list,&freeList[currentOrder]);
+            buddy->flags |= PageData;
+            buddy->data = currentOrder;
+         } /*Split the page.*/
+         return page;
       }
    }
    return 0;

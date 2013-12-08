@@ -162,10 +162,10 @@ int drawChar(u8 red,u8 green,u8 blue,int x,int y,unsigned char charDrawing)
       for(int cx = FONT_WIDTH_EVERY_CHAR - 1;cx >= 0; --cx)
       {
          u8 numberOfFont = cx / 8;
-	 u8 mask = 1 << (8 - cx % 8 - 1);
-	 if(font[cy * FONT_BYTES_PER_LINE_EVERY_CHAR + numberOfFont] & mask)
-	    drawPoint(red,green,blue,x + cx,y + cy); /*It's a always-inline function.*/
-	                                             /*It defined in vesa.h .*/
+         u8 mask = 1 << (8 - cx % 8 - 1);
+         if(font[cy * FONT_BYTES_PER_LINE_EVERY_CHAR + numberOfFont] & mask)
+            drawPoint(red,green,blue,x + cx,y + cy); /*It's a always-inline function.*/
+                                                     /*It defined in vesa.h .*/
       }
    }
    return 0;
@@ -226,7 +226,7 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
          break;
       case '\n': /*Line feed?*/
          x = xRes; /*Let x = the end of the line.*/
-	 break;
+         break;
       case '\t':
          {
 /* |---tab---||---tab---||---tab---|
@@ -235,27 +235,27 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
  * -----------|--p--|---------------
  * ----------------(x)--------------
  * xyzabcedefdakpoew---------------- */
-	    int p = x % (FONT_TAB_WIDTH);
-	    int a = FONT_TAB_WIDTH - p; 
-	    x -= FONT_DISPLAY_WIDTH; /*Offset x += FONT_DISPLAY_WIDTH;*/
-	    if(!p)break;
+            int p = x % (FONT_TAB_WIDTH);
+            int a = FONT_TAB_WIDTH - p; 
+            x -= FONT_DISPLAY_WIDTH; /*Offset x += FONT_DISPLAY_WIDTH;*/
+            if(!p)break;
             x += a; 
-	    break;
-	 }
+            break;
+         }
       default:
          drawChar(red,green,blue,x,y,c);
-	 break;
+         break;
       }
       x += FONT_DISPLAY_WIDTH;
       if(x + FONT_DISPLAY_WIDTH > xRes) /*Line feed?*/
       {
          x = 0;
-	 y += FONT_DISPLAY_HEIGHT;
-	 if(y + FONT_DISPLAY_HEIGHT > yRes) 
-	 {
-	    screenUp(1);
-	    y -= FONT_DISPLAY_HEIGHT;
-	 }
+         y += FONT_DISPLAY_HEIGHT;
+         if(y + FONT_DISPLAY_HEIGHT > yRes) 
+         {
+            screenUp(1);
+            y -= FONT_DISPLAY_HEIGHT;
+         }
       }
    }
 

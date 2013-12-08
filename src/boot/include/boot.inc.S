@@ -15,7 +15,7 @@
 
 .set KERNEL_ENTRY_ADDRESS , 0x100000 /*It is 1MB.*/
                                      /*It is the same as KERNEL_REAL_MEMORY.*/
-				     /*Because the kernel is a binary file.*/
+                                     /*Because the kernel is a binary file.*/
 
 .set VBE_INFO_MEMORY_SEG           , 0x8000   /*The memory of vbe controller info.(seg)*/
                                               /*Offset = 0x0.*/

@@ -34,8 +34,8 @@ void *memset(void *mem,u8 c,u64 len)
       while((pointer)mem % 8)
       {
          *((u8 *)mem) = c;
-	 mem += 1;
-	 len -= 1;
+         mem += 1;
+         len -= 1;
       }
 
       mem64 = (u64 *)mem;
@@ -43,8 +43,8 @@ void *memset(void *mem,u8 c,u64 len)
       while(loop > 0)
       {
          mem64[0] = mem64[1] = mem64[2] = mem64[3]
-	    = mem64[4] = mem64[5] = mem64[6] = mem64[7] = fill;
-	 mem += 8;
+            = mem64[4] = mem64[5] = mem64[6] = mem64[7] = fill;
+         mem += 8;
          loop -= 1;
       }
       len %= 64;
@@ -53,8 +53,8 @@ void *memset(void *mem,u8 c,u64 len)
       while(loop > 0)
       {
          mem64[0] = fill;
-	 mem64 += 1;
-	 loop -= 1;
+         mem64 += 1;
+         loop -= 1;
       }
       len %= 8;
 
@@ -140,14 +140,14 @@ int strlen(const char *string)
       if((((dword + 0x7efefeffL) ^~dword) & (~ 0x7efefeffL)) != 0)
       {
          charString = (const char *)(dwordString - 1);
-	 if(charString[0] == '\0')
-	    return charString - string + 0;
-	 if(charString[1] == '\0')
-	    return charString - string + 1;
-	 if(charString[2] == '\0')
-	    return charString - string + 2;
-	 if(charString[3] == '\0')
-	    return charString - string + 3;
+         if(charString[0] == '\0')
+            return charString - string + 0;
+         if(charString[1] == '\0')
+            return charString - string + 1;
+         if(charString[2] == '\0')
+            return charString - string + 2;
+         if(charString[3] == '\0')
+            return charString - string + 3;
       }
    }
 }

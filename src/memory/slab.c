@@ -131,18 +131,18 @@ retry:
       if(list == &cache->slabPartial)
       {
          list = cache->slabFree.next;
-	 if(list == &cache->slabFree)
-	    break;
+         if(list == &cache->slabFree)
+            break;
       }
 
       Slab *slab = listEntry(list,Slab,list);
       while(slab->usedCount < cache->perSlabObjCount && --batchCount)
       {
          ++slab->usedCount;
-	 localCache->data[localCache->avail++] = 
-	    slab->memory + slab->nextFree * cache->objSize;
-	 slab->nextFree = slab->objDescriptor[slab->nextFree];
-	 --cache->freeObjCount;
+         localCache->data[localCache->avail++] = 
+            slab->memory + slab->nextFree * cache->objSize;
+         slab->nextFree = slab->objDescriptor[slab->nextFree];
+         --cache->freeObjCount;
       }
       listDelete(&slab->list);
       if(slab->nextFree == (u32)-1) /*Full?*/
@@ -182,8 +182,8 @@ static int flushLocalCache(SlabCache *cache)
       listDelete(&slab->list);
       if(!slab->usedCount){ /*Free?*/
          if(cache->freeObjCount > cache->freeLimit)
-	    destorySlab(cache,slab);
-	 else
+            destorySlab(cache,slab);
+         else
             listAdd(&slab->list,&cache->slabFree);
       }else
          listAdd(&slab->list,&cache->slabPartial);

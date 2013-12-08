@@ -190,7 +190,7 @@ static int ideWaitDRQ(u8 device)
       if(status & IDE_STATUS_ERROR) /*Error?*/
       {
          error = 1;
-	 break;
+         break;
       }
       if((!(status & IDE_STATUS_BUSY)) && (status & IDE_STATUS_DRQ))
          break;
@@ -298,11 +298,12 @@ static int parseISO9660FileSystemDir(
       {
          offset -= ATAPI_SECTOR_SIZE;
          ++lba;
-	 needRead = 1;
-	 /*Read again.*/
+         needRead = 1;
+         /*Read again.*/
       }
       if(needRead)
-         ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8);
+         if(ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8))
+            return -1;
       needRead = 0;
       
       if(buf8[offset + 0x0] == 0x0) /*No more.*/
@@ -330,7 +331,7 @@ static int parseISO9660FileSystemDir(
       char filename[filenameLength + 1]; /*Add 1 for '\0'.*/
       memcpy((void *)filename,
          (const void *)(buf8 + offset + 33),
-	 filenameLength);
+         filenameLength);
 
       if((!isDir) && (filename[0] == '_'))
          filename[0] = '.';
@@ -342,21 +343,22 @@ static int parseISO9660FileSystemDir(
       /*To lower.*/
       for(u64 i = 0;i < filenameLength;++i)
          if((filename[i] <= 'Z') && (filename[i] >= 'A'))
-	    filename[i] -= 'A' - 'a';
+            filename[i] -= 'A' - 'a';
       if(isDir)
       {
          printk("LBA:%d.",(int)fileLBA);
          printk("Dirname:%s\n",filename);
-	 parseISO9660FileSystemDir(device,fileLBA,buf8,depth + 1);
+         parseISO9660FileSystemDir(device,fileLBA,buf8,depth + 1);
          ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8);
-	 /*We must read again.*/
+         /*We must read again.*/
       }
       else
       {
          if(filesize != 0)
             printk("LBA:%d.",(int)fileLBA);
-	 else
-	    printk("Null file,no LBA.");
+         else
+            printk("Null file,no LBA.");
+            /*LBA may not be right if this file is null!*/
          printk("Filename:%s\n",filename);
       }
    }
@@ -371,7 +373,7 @@ static int parseISO9660FileSystem(IDEDevice *device)
    /*And http://en.wikipedia.org/wiki/ISO_9660.*/
    u8  *buf8  = (u8  *)ideIOBuffer;
 
-   /*System Area (32,768 B)	Unused by ISO 9660*/
+   /*System Area (32,768 B)     Unused by ISO 9660*/
    /*32786 = 0x8000.*/
    u64 lba = (0x8000 / 0x800);
 
@@ -435,47 +437,47 @@ static int ideEnable(Device *device)
       for(int j = 0;j < 2;++j)
       {
          ideDevices[i][j].primary = i;
-	 ideDevices[i][j].master = j;
+         ideDevices[i][j].master = j;
          ideDevices[i][j].type = InvalidIDEDevice;
 
          u8 error = 0;
-	 IDEDeviceType type = IDEDeviceTypeATA;
+         IDEDeviceType type = IDEDeviceTypeATA;
          ideOutb(i,IDE_REG_DEV_SEL,0xa0 | (j << 4));
-	    /*Select master.*/
+            /*Select master.*/
          for(int k = 0;k < 4;++k) /*A little delay.*/
             ideInb(i,IDE_REG_CONTROL);
 
-	 ideOutb(i,IDE_REG_COMMAND,IDE_CMD_IDENTIFY);
+         ideOutb(i,IDE_REG_COMMAND,IDE_CMD_IDENTIFY);
          for(int k = 0;k < 4;++k) /*A little delay.*/
            ideInb(i,IDE_REG_CONTROL);
 
          if(!ideInb(i,IDE_REG_STATUS))
-	    continue;
+            continue;
 
          error = ideWaitDRQ(i);
-	 if(error)
-	 { /*it is not an ata device if error.*/
-	   /*Maybe it is an atapi device. (Such as CD-ROM.)*/
-	    u8 cl = ideInb(i,IDE_REG_LBA1);
-	    u8 ch = ideInb(i,IDE_REG_LBA2);
+         if(error)
+         { /*it is not an ata device if error.*/
+           /*Maybe it is an atapi device. (Such as CD-ROM.)*/
+            u8 cl = ideInb(i,IDE_REG_LBA1);
+            u8 ch = ideInb(i,IDE_REG_LBA2);
 
-	    if((cl == 0x14) && (ch == 0xeb))
-	       ;
-	    else if((cl == 0x69) && (ch == 0x96))
-	       ;
-	    else /*It is not an atapi device.*/
-	       continue;
-	    type = IDEDeviceTypeATAPI;
-	    ideOutb(i,IDE_REG_COMMAND,IDE_CMD_IDENTIFY_PACKET); 
-	    error = ideWaitDRQ(i); /*Wait DRQ again.*/
-	    if(error)
-	       continue;
-	 }
+            if((cl == 0x14) && (ch == 0xeb))
+               ;
+            else if((cl == 0x69) && (ch == 0x96))
+               ;
+            else /*It is not an atapi device.*/
+               continue;
+            type = IDEDeviceTypeATAPI;
+            ideOutb(i,IDE_REG_COMMAND,IDE_CMD_IDENTIFY_PACKET); 
+            error = ideWaitDRQ(i); /*Wait DRQ again.*/
+            if(error)
+               continue;
+         }
 
-	 ideInsl(i,IDE_REG_DATA,128,ideIOBuffer);
+         ideInsl(i,IDE_REG_DATA,128,ideIOBuffer);
          
          ideParseIdentifyData(&ideDevices[i][j],type,ideIOBuffer);
-	    /*Read and parse it.*/
+            /*Read and parse it.*/
       }
    }
 
@@ -501,16 +503,16 @@ static int initIDE(void)
       for(int j = 0;j < sizeof(ideDevices[0])/sizeof(ideDevices[0][0]);++j)
       {
          device = &ideDevices[i][j];
-	 if(device->type == IDEDeviceTypeATAPI)
-	    if(device->subType == IDEDeviceSubTypeCDROM)
-	    {
-	       /*Found an CD-ROM device.*/
-	       printkInColor(0x00,0xff,0x00,
-	          "Found IDE ATAPI CDROM Device,");
-	       printkInColor(0x00,0xff,0x00,
-	          "Position:%d,%d,%d,%d\n",i,j,device->primary,device->master);
-	       goto found;
-	    }
+         if(device->type == IDEDeviceTypeATAPI)
+            if(device->subType == IDEDeviceSubTypeCDROM)
+            {
+               /*Found an CD-ROM device.*/
+               printkInColor(0x00,0xff,0x00,
+                  "Found IDE ATAPI CDROM Device,");
+               printkInColor(0x00,0xff,0x00,
+                  "Position:%d,%d,%d,%d\n",i,j,device->primary,device->master);
+               goto found;
+            }
       }
    }
 

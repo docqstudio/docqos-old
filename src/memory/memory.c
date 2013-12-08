@@ -94,8 +94,8 @@ int calcMemorySize(void)
       if(type == 0x1)
       {
          temp = base + limit;
-	 if(temp > memorySize)
-	    memorySize = temp;
+         if(temp > memorySize)
+            memorySize = temp;
       }
   }
   return 0;

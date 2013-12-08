@@ -24,7 +24,7 @@
       : "D" (prev),"S" (next) \
       : "%rax","%rbx","%rcx","%rdx","%r8","%r9","%r10", \
         "%r11","%r12","%r13","%r14","%r15","memory" \
-	/*All registers.*/ \
+        /*All registers.*/ \
    );
 
 extern void *endAddressOfKernel;
@@ -99,15 +99,15 @@ static int __switchTo(Task *prev,Task *next,u64 rip,u64 rsp) /*It will be run by
          prev->state = TaskSleeping;
          prev->rip = rip;
          prev->rsp = rsp;
-	 if(prev != idleTask)
-	 {
-	    listAddTail(&prev->sleepingList,&sleepingTasks);
-	 }
+         if(prev != idleTask)
+         {
+            listAddTail(&prev->sleepingList,&sleepingTasks);
+         }
          unlockSpinLock(&prev->lock);
       }else if(prev->state == TaskExited)
       {
          destoryTask(prev);
-	 /*We don't need to unlock prev->lock.*/
+         /*We don't need to unlock prev->lock.*/
       }
    }
    lockSpinLock(&next->lock);

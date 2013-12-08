@@ -121,7 +121,7 @@ static int parseDevice(u16 bus,u16 device)
    if(header & 0x80) /*This device has more functions?*/
       for(int function = 1;function < 8;++function)
          if(pciInw(bus,device,function,PCI_CMD_VENDOR_WORD) != 0xffff)
-	    parseFunction(bus,device,function); /*Parse it!*/
+            parseFunction(bus,device,function); /*Parse it!*/
    return 0;
 }
 
@@ -147,7 +147,7 @@ static int initPCI(void)
       for(int bus = 0;bus < 8;++bus)
       {
          if(pciInw(bus,0x0,0x0,PCI_CMD_VENDOR_WORD) != 0xffff)
-	    break; /*No more buses.*/
+            break; /*No more buses.*/
          parseBus(bus);
       }
    else

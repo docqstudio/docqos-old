@@ -42,7 +42,7 @@ int initKMalloc(void)
       if(!mallocSizes[i].cache)
       {
          printkInColor(0xff,0x00,0x00,"(%s) Can't get memorySize[%d].cache!",__func__,i);
-	 return -1;
+         return -1;
       }
 #endif
    }
