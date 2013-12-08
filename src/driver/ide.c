@@ -217,7 +217,10 @@ static int ideReadATAPI(IDEDevice *device,u64 lba,u64 size,void *buf)
    if(ideWaitDRQ(primary))
       return -1; /*Return if error.*/
 
-   cmd[9] = (size % 2048)?(size / 2048 + 1):(size / 2048);
+   cmd[9] = 
+      (size % ATAPI_SECTOR_SIZE) 
+      ? (size / ATAPI_SECTOR_SIZE + 1) 
+      : (size / ATAPI_SECTOR_SIZE);
    cmd[2] = (lba >> 0x18) & 0xff;
    cmd[3] = (lba >> 0x10) & 0xff;
    cmd[4] = (lba >> 0x08) & 0xff;
@@ -281,21 +284,100 @@ static int ideParseIdentifyData(IDEDevice *device,IDEDeviceType type,void *__dat
    return 0;
 }
 
+static int parseISO9660FileSystemDir(
+   IDEDevice *device,u64 lba,u8 *buf8,int depth)
+{
+   u64 offset = 0;
+   u8 isDir = 0;
+   u8 needRead = 0;
+   if(ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8))
+      return -1;
+   for(;;offset += buf8[offset + 0x0] /*Length of Directory Record.*/)
+   {
+      while(offset >= ATAPI_SECTOR_SIZE)
+      {
+         offset -= ATAPI_SECTOR_SIZE;
+         ++lba;
+	 needRead = 1;
+	 /*Read again.*/
+      }
+      if(needRead)
+         ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8);
+      needRead = 0;
+      
+      if(buf8[offset + 0x0] == 0x0) /*No more.*/
+         break;
+       
+      /*Location of extent (LBA) in both-endian format.*/
+      u64 fileLBA = *(u32 *)(buf8 + offset + 0x2);
+      if(fileLBA <= lba)
+        continue;
+      int __depth = depth;
+      while(__depth--)
+         printk("--");
+
+      isDir = buf8[offset + 25] & 0x2; /*Is it a dir?*/
+
+      u64 filesize = *(u32 *)(buf8 + offset + 10);
+
+      /*Length of file identifier (file name). 
+       * This terminates with a ';' character 
+       * followed by the file ID number in ASCII coded decimal ('1').*/
+      u64 filenameLength = buf8[offset + 32];
+      if(!isDir)
+         filenameLength -= 2; /*Remove ';' and '1'.*/
+
+      char filename[filenameLength + 1]; /*Add 1 for '\0'.*/
+      memcpy((void *)filename,
+         (const void *)(buf8 + offset + 33),
+	 filenameLength);
+
+      if((!isDir) && (filename[0] == '_'))
+         filename[0] = '.';
+      if((!isDir) && (filename[filenameLength - 1] == '.'))
+         filename[filenameLength - 1] = '\0';
+      else
+         filename[filenameLength] = '\0';
+
+      /*To lower.*/
+      for(u64 i = 0;i < filenameLength;++i)
+         if((filename[i] <= 'Z') && (filename[i] >= 'A'))
+	    filename[i] -= 'A' - 'a';
+      if(isDir)
+      {
+         printk("LBA:%d.",(int)fileLBA);
+         printk("Dirname:%s\n",filename);
+	 parseISO9660FileSystemDir(device,fileLBA,buf8,depth + 1);
+         ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8);
+	 /*We must read again.*/
+      }
+      else
+      {
+         if(filesize != 0)
+            printk("LBA:%d.",(int)fileLBA);
+	 else
+	    printk("Null file,no LBA.");
+         printk("Filename:%s\n",filename);
+      }
+   }
+
+
+   return 0;
+}
+
 static int parseISO9660FileSystem(IDEDevice *device)
 {
    /*See also http://wiki.osdev.org/ISO_9660.*/
    /*And http://en.wikipedia.org/wiki/ISO_9660.*/
-   /*Now this function only support ISO9660 as flat file system.*/
    u8  *buf8  = (u8  *)ideIOBuffer;
 
    /*System Area (32,768 B)	Unused by ISO 9660*/
    /*32786 = 0x8000.*/
    u64 lba = (0x8000 / 0x800);
-   u64 offset = 0;
 
    for(;;++lba)
    {
-      if(ideRead(device,lba,2048,buf8))
+      if(ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8))
          return -1; /*It may not be inserted if error.*/
       /*Identifier is always "CD001".*/
       if(buf8[1] != 'C' ||
@@ -317,54 +399,8 @@ static int parseISO9660FileSystem(IDEDevice *device)
        lba = *(u32 *)(buf8 + 156 + 2);
        break;
    }
-
    
-   if(ideRead(device,lba,2048,buf8))
-      return -1;
-   for(;;offset += buf8[offset + 0x0] /*Length of Directory Record.*/)
-   {
-      if(offset >= 2048)
-      {
-         offset -= 2048;
-         if(ideRead(device,++lba,2048,buf8))
-	    return -1;
-	 /*Read again.*/
-      }
-      
-      if(buf8[offset + 0x0] == 0x0) /*No more.*/
-         break;
-       
-      /*Location of extent (LBA) in both-endian format.*/
-      u64 fileLBA = *(u32 *)(buf8 + offset + 0x2);
-      if(fileLBA <= lba)
-         continue;
-      printk("LBA:%d,",fileLBA);
-
-      /*Length of file identifier (file name). 
-       * This terminates with a ';' character 
-       * followed by the file ID number in ASCII coded decimal ('1').*/
-      u64 filenameLength = buf8[offset + 32];
-      filenameLength -= 2; /*Remove ';' and '1'.*/
-
-      char filename[filenameLength + 1]; /*Add 1 for '\0'.*/
-      memcpy((void *)filename,
-         (const void *)(buf8 + offset + 33),
-	 filenameLength);
-      if(filename[0] == '_')
-         filename[0] = '.';
-      if(filename[filenameLength - 1] == '.')
-         filename[filenameLength - 1] = '\0';
-      else
-         filename[filenameLength] = '\0';
-
-      /*To lower.*/
-      for(u64 i = 0;i < filenameLength;++i)
-         if((filename[i] <= 'Z') && (filename[i] >= 'A'))
-	    filename[i] -= 'A' - 'a';
-      printk("filename:%s\n",filename);
-   }
-
-   return 0;
+   return parseISO9660FileSystemDir(device,lba,buf8,0);
 }
 static int ideProbe(Device *device)
 {
