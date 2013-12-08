@@ -16,6 +16,24 @@
 
 extern void *endAddressOfKernel;
 
+extern InitcallFunction initcallStart;
+extern InitcallFunction initcallEnd;
+
+int doInitcalls(void)
+{
+   InitcallFunction *start = &initcallStart;
+   InitcallFunction *end = &initcallEnd;
+   int ret = 0;
+   printk("\n");
+   for(;start < end;++start)
+   {
+      ret = (*start)();
+      if(ret)
+         return ret;
+   }
+   return ret;
+}
+
 int kmain(void)
 {
    endAddressOfKernel = (void *)(&endAddressOfKernel + 1);
@@ -39,8 +57,6 @@ int kmain(void)
 
    if(initACPI())
       return -1;
-   if(initPCI())
-      return -1;
 
    if(initInterrupt())
       return -1;
@@ -49,6 +65,9 @@ int kmain(void)
       return -1;
    if(initLocalTime())
       return -1;
+
+   doInitcalls();
+
    initTask();
    return 0;
 }

@@ -8,7 +8,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
-   .obj/pci.o
+   .obj/pci.o .obj/ide.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -116,6 +116,10 @@ cachedir:
 .obj/pci.o:driver/pci.c ../include/driver/driver.h ../include/core/const.h ../include/driver/pci.h \
            ../include/video/console.h ../include/cpu/io.h ../include/memory/kmalloc.h ../include/core/list.h \
 	   ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/ide.o:driver/ide.c ../include/core/const.h ../include/video/console.h ../include/driver/driver.h \
+            ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
+	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)

@@ -22,9 +22,9 @@
 static inline u32 pciInl(u16 bus,u16 device,u16 function,u16 offset)
    __attribute__ ((always_inline));
 static inline u16 pciInw(u16 bus,u16 device,u16 function,u16 offset)
- __attribute__ ((always_inline));
+    __attribute__ ((always_inline));
 static inline u8 pciInb(u16 bus,u16 device,u16 function,u16 offset)
- __attribute__ ((always_inline));
+    __attribute__ ((always_inline));
 
 static inline u32 pciInl(u16 bus,u16 device,u16 function,u16 offset)
 {
@@ -132,7 +132,7 @@ static int parseBus(u16 bus)
    return 0;
 }
 
-int initPCI(void)
+static int initPCI(void)
 {
    outl(PCI_CMD_REG,0x80000000);
    if(inl(PCI_CMD_REG) != 0x80000000)
@@ -154,3 +154,5 @@ int initPCI(void)
       parseBus(0); /*Only one bus.*/
    return 0;
 }
+
+subsysInitcall(initPCI);

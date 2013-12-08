@@ -2,6 +2,7 @@
 #include <driver/driver.h>
 #include <core/list.h>
 #include <cpu/spinlock.h>
+#include <video/console.h>
 
 static ListHead drivers = {};
 static ListHead devices = {};
@@ -11,6 +12,8 @@ static SpinLock driverLock = {};
 
 int registerDevice(Device *device)
 {
+   device->driver = 0;
+
    lockSpinLock(&driverLock);
    listAddTail(&device->list,&devices);
 

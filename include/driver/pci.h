@@ -16,5 +16,3 @@ typedef struct PCIDevice
    Device globalDevice;
 } PCIDevice;
 
-int initPCI(void);
-

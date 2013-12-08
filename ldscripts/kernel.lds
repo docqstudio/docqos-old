@@ -21,6 +21,15 @@ SECTIONS {
    }
    . = ALIGN(8);
 
+   initcallStart = .;
+
+   .init.initcall : {
+      *(.init.initcall0)
+      *(.init.initcall1)
+   }
+
+   initcallEnd   = .;
+
    endAddressOfKernel = .;
 
    /DISCARD/ : { *.* }

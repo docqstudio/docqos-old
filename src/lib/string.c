@@ -4,6 +4,7 @@
 void *memcpy(void *to,const void *from,int n) /*NOTE: It's easy enough,but it's also slow enough.*/
 {
    asm volatile (
+      "cld\n\t"
       "cmpq $0,%%rcx\n\t"
       "je 2f\n\t"
       "rep; movsl\n\t"

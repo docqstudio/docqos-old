@@ -15,4 +15,14 @@ typedef u64 pointer;
 #define offsetOf(type,member) \
    ((pointer)&((type *)0)->member)
 
+typedef int (*InitcallFunction)(void);
+
+#define DEFINE_INITCALL(id,fn) \
+   static InitcallFunction __##fn##Initcall##id \
+   __attribute__ ((section(".init.initcall" #id),used)) \
+   = &fn
+
+#define subsysInitcall(fn) DEFINE_INITCALL(0,fn)
+#define driverInitcall(fn) DEFINE_INITCALL(1,fn)
+
 #define CONFIG_DEBUG

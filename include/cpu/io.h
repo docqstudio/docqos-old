@@ -9,6 +9,10 @@ inline int outw(u16 port,u16 data) __attribute__ ((always_inline));
 inline u32 inl(u16 port) __attribute__ ((always_inline));
 inline int outl(u16 port,u32 data) __attribute__ ((always_inline));
 
+inline int insl(u16 port,u64 size,void *to) __attribute__ ((always_inline));
+inline int insw(u16 port,u64 size,void *to) __attribute__ ((always_inline));
+inline int outsw(u16 port,u64 size,void *from) __attribute__ ((always_inline));
+
 inline int closeInterrupt(void) __attribute__ ((always_inline));
 inline int startInterrupt(void) __attribute__ ((always_inline));
 inline u64 storeInterrupt(void) __attribute__ ((always_inline));
@@ -51,6 +55,38 @@ inline int outl(u16 port,u32 data)
    return 0;
 }
 
+inline int insl(u16 port,u64 size,void *to) 
+{
+   asm volatile(
+      "rep;insl"
+      :"=D"(to),"=c"(size)
+      :"D"(to),"c"(size),"d"((u64)port)
+      :"memory"
+   );
+   return 0;
+}
+
+inline int insw(u16 port,u64 size,void *to) 
+{
+   asm volatile(
+      "rep;insw"
+      :"=D"(to),"=c"(size)
+      :"D"(to),"c"(size),"d"((u64)port)
+      :"memory"
+   );
+   return 0;
+}
+
+inline int outsw(u16 port,u64 size,void *from) 
+{
+   asm volatile(
+      "rep;outsw"
+      :"=S"(from),"=c"(size)
+      :"S"(from),"c"(size),"d"((u64)port)
+      :"memory"
+   );
+   return 0;
+}
 inline int closeInterrupt(void)
 {
    asm volatile("cli");
