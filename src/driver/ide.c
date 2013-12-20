@@ -4,6 +4,7 @@
 #include <driver/pci.h>
 #include <lib/string.h>
 #include <cpu/io.h>
+#include <interrupt/interrupt.h>
 
 typedef enum IDEDeviceType{
    InvalidIDEDevice,
@@ -522,6 +523,7 @@ found:
    int ret = parseISO9660FileSystem(device);
           /*Parse it.*/
    printk("\n");
+ 
    return (ret ? 1 : 0);
 }
 

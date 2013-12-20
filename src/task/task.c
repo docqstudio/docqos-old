@@ -59,13 +59,12 @@ static Task *allocTask(u64 rip)
 
 static Task *addTask(Task *ret)
 {
-   u64 rflags;
-   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
+   lockSpinLock(&scheduleLock);
 
    listAddTail(&ret->list,&tasks);
    listAddTail(&ret->sleepingList,&sleepingTasks);
 
-   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
+   unlockSpinLock(&scheduleLock);
 
    return ret;
 }
@@ -94,7 +93,7 @@ static int __switchTo(Task *prev,Task *next,u64 rip,u64 rsp) /*It will be run by
    if(prev)
    {
       lockSpinLock(&prev->lock);
-      if(prev->state == TaskRunning)
+      if((prev->state == TaskRunning) || (prev->state == TaskSleeping))
       {
          prev->state = TaskSleeping;
          prev->rip = rip;
@@ -108,6 +107,11 @@ static int __switchTo(Task *prev,Task *next,u64 rip,u64 rsp) /*It will be run by
       {
          destoryTask(prev);
          /*We don't need to unlock prev->lock.*/
+      }else if(prev->state == TaskStopping)
+      {
+         prev->rip = rip;
+         prev->rsp = rsp;
+         unlockSpinLock(&prev->lock);
       }
    }
    lockSpinLock(&next->lock);
@@ -146,6 +150,8 @@ TEST_TASK(D);
 
 static int idle(void)
 {
+   int doInitcalls(void);
+
    closeInterrupt();
 
    printk("\n");
@@ -157,21 +163,22 @@ static int idle(void)
    /*finishScheduling();*/
    /*Don't need to do this,because the idle task is scheduled by scheduleFirst.*/
 
+   doInitcalls();
+
    createKernelTask(taskA);
    createKernelTask(taskB);
    createKernelTask(taskC);
    createKernelTask(taskD);
 
    startInterrupt();
-
-   schedule();
-   for(;;);
+   
+   for(;;)schedule();
    return 0;
 }
 
 Task *getCurrentTask(void)
 {
-   u64 ret;
+   pointer ret;
    asm volatile(
       "movq %%rsp,%%rax\n\t"
       "andq $0xffffffffffffe000,%%rax"
@@ -187,7 +194,7 @@ int finishScheduling(void) /*It will be called in retFromFork,schedule etc.*/
    Task *cur = getCurrentTask();
    if(cur->preemption == 0) /*First run.*/
       disablePreemption(); /*It will be enabled when we unlock spin lock.*/
-   unlockSpinLockEnableInterrupt(&scheduleLock);
+   unlockSpinLock(&scheduleLock);
    return 0;
 }
 
@@ -198,8 +205,7 @@ int schedule(void)
       return 0; 
    Task *next = 0;
 
-   u64 rflags;
-   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
+   lockSpinLock(&scheduleLock);
    /*If we schedule successfully,it will be unlocked in finishScheduling.*/
 
    if(!listEmpty(&sleepingTasks))
@@ -207,17 +213,16 @@ int schedule(void)
       next = listEntry(sleepingTasks.next,Task,sleepingList);
       listDelete(&next->sleepingList);
    }else if((prev->state == TaskRunning)){
-      unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
+      unlockSpinLock(&scheduleLock);
       return 0;
    }else
       next = idleTask;
 
    if(next == prev)
    {
-      unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
+      unlockSpinLock(&scheduleLock);
       return 0;
    }
-
    switchTo(prev,next);
 
    finishScheduling();
@@ -260,16 +265,15 @@ int doExit(int n)
          "IDLE Task Called Exit!!!\n\n");
       for(;;); /*IDLE Task should never be exited.*/
    }
-   u64 rflags;
-   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
+   lockSpinLock(&scheduleLock);
 
    lockSpinLock(&current->lock);
    current->state = TaskExited;
       /*This task will really be destoried in __switchTo.*/
    unlockSpinLock(&current->lock);
 
-   unlockSpinLockEnableInterrupt(&scheduleLock);
-   /*We don't need to restore rflags.*/
+   unlockSpinLock(&scheduleLock);
+   
    schedule();
 
    for(;;);
@@ -293,6 +297,23 @@ int createKernelTask(KernelTask task)
    regs.rflags = storeInterrupt();
    doFork(&regs);
 
+   return 0;
+}
+
+int wakeUpTask(Task *task)
+{
+   lockSpinLock(&scheduleLock);
+   lockSpinLock(&task->lock);
+
+   do{
+      if(task->state != TaskStopping)
+         break;
+      task->state = TaskSleeping;
+      listAddTail(&task->sleepingList,&sleepingTasks);
+   }while(0);
+
+   unlockSpinLock(&task->lock);
+   unlockSpinLock(&scheduleLock);
    return 0;
 }
 

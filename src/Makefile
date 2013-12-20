@@ -8,7 +8,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
-   .obj/pci.o .obj/ide.o
+   .obj/pci.o .obj/ide.o .obj/semaphore.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -39,11 +39,13 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h  \
             ../include/memory/paging.h ../include/cpu/spinlock.h ../include/cpu/io.h ../include/task/task.h \
-            ../include/cpu/spinlock_types.h
+            ../include/cpu/spinlock_types.h ../include/task/semaphore.h ../include/task/waitqueue.h \
+	    ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/font.o:video/font.c ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
-.obj/console.o:video/console.c ../include/core/const.h ../include/video/vesa.h ../include/lib/stdarg.h
+.obj/console.o:video/console.c ../include/core/const.h ../include/video/vesa.h ../include/lib/stdarg.h \
+               ../include/video/console.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/memory.o:memory/memory.c ../include/core/const.h ../include/memory/memory.h ../include/video/console.h \
               ../include/memory/buddy.h ../include/core/list.h ../include/memory/paging.h
@@ -106,7 +108,7 @@ cachedir:
 .obj/task.o:task/task.c ../include/core/const.h ../include/cpu/io.h ../include/task/task.h \
             ../include/video/console.h ../include/core/list.h ../include/cpu/spinlock.h \
 	    ../include/memory/buddy.h ../include/cpu/atomic.h ../include/lib/string.h \
-	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h
+	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h 
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/fork.o:task/fork.S
 	$(AS) $(ASFLAGS) -o $@ $<
@@ -119,8 +121,14 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/ide.o:driver/ide.c ../include/core/const.h ../include/video/console.h ../include/driver/driver.h \
             ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
-	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h
+	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h ../include/interrupt/interrupt.h
 	$(CC) $(CFLAGS) -o $@ $<
+.obj/semaphore.o: task/semaphore.c ../include/core/const.h ../include/task/semaphore.h \
+                  ../include/task/waitqueue.h ../include/task/task.h ../include/core/list.h \
+		  ../include/cpu/spinlock_types.h ../include/interrupt/interrupt.h ../include/cpu/spinlock.h \
+                  ../include/cpu/atomic.h
+	$(CC) $(CFLAGS) -o $@ $<
+
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)
 	$(TOBINARY) $(TARGET) $(TARGET)

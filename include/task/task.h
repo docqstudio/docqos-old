@@ -9,6 +9,7 @@
 typedef enum TaskState{
    TaskRunning,
    TaskSleeping,
+   TaskStopping,
    TaskExited
 } TaskState;
 
@@ -46,6 +47,7 @@ int doExit(int n) __attribute__ ((noreturn));
 int doFork(IRQRegisters *reg);
 
 int createKernelTask(KernelTask task);
+int wakeUpTask(Task *task);
 
 int initTask(void) __attribute__ ((noreturn));
 /*It will never return!!!It will be called in the end of kmain.*/

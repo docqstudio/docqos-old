@@ -63,7 +63,8 @@ irq 23
 irqHandler:
    SAVE_ALL
 
-   call doIRQ
+   movq %rsp,%rdi
+   callq doIRQ
 
    RESTORE_ALL
    addq $8,%rsp /*Skip the interrupt vector.*/
@@ -99,9 +100,10 @@ handleLocalApicTimer:
    pushq $0xfe
    SAVE_ALL
 
-   call doIRQ
+   movq %rsp,%rdi
+   callq doIRQ
 
-1:
    RESTORE_ALL
    addq $8,%rsp
+
    iretq

@@ -14,12 +14,11 @@ static IRQHandler irqHandlerTable[IRQ_COUNT] = {
    [0 ... IRQ_COUNT - 1] = 0
 }; 
 
-int doIRQ(IRQRegisters reg)
+int doIRQ(IRQRegisters *reg)
 {
    localApicSendEOI(); /*Send EOI to local APIC.*/
    int ret;
-
-   switch(reg.irq)
+   switch(reg->irq)
    {
    case LOCAL_TIMER_INT: /*Local APIC Timer Interrupt?*/
       setupLocalApicTimer(1,0); /*Disable.*/
@@ -27,22 +26,22 @@ int doIRQ(IRQRegisters reg)
          return 0;
       startInterrupt();
       
-      ret = localApicTimerHandler(&reg);
+      ret = localApicTimerHandler(reg);
 
       closeInterrupt();
       setupLocalApicTimer(0,0); /*Enable.*/
       break;
    default:
-      ioApicDisableIRQ((u8)reg.irq);
+      ioApicDisableIRQ((u8)reg->irq);
 
-      if(irqHandlerTable[reg.irq] == 0)
+      if(irqHandlerTable[reg->irq] == 0)
          return 0; /*We needn't to enable this IRQ,it should be disabled.*/
       startInterrupt();
 
-      ret = (irqHandlerTable[reg.irq])(&reg);
-   
+      ret = (irqHandlerTable[reg->irq])(reg);
+
       closeInterrupt();
-      ioApicEnableIRQ((u8)reg.irq); /*Enable this irq.*/
+      ioApicEnableIRQ((u8)reg->irq); /*Enable this irq.*/
       break;
    }
    if(ret == 1)/*Need schedule.*/

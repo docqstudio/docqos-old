@@ -1,3 +1,5 @@
+#include <core/const.h>
+#include <video/console.h>
 #include <video/vesa.h>
 #include <lib/stdarg.h>
 #include <lib/string.h>
@@ -15,7 +17,7 @@ int printkInColor(u8 red,u8 green,u8 blue,const char *string, ...)
    writeStringInColor(red,green,blue,buf);
    return ret;
 }
-/*It returns how many chars it displayed.*/
+
 int printk(const char *string, ...)
 {
    char buf[256];
@@ -24,7 +26,8 @@ int printk(const char *string, ...)
    varArgsStart(list,string);
    ret = (int)(vsprintk(buf,string,list) - buf);
    varArgsEnd(list);
-   writeStringInColor(0xff,0xff,0xff,buf);
+
+   writeString(buf);
    return ret;
 }
 char *vsprintk(char *buf,const char *string,VarArgsList list) 

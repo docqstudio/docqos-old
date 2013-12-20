@@ -2,27 +2,28 @@
 #include <core/const.h>
 
 typedef struct AtomicType{
-   u32 data;
+   int data;
 } AtomicType;
 
-inline u32 atomicRead(AtomicType *atomic) __attribute__ ((always_inline));
-inline int atomicSet(AtomicType *atomic,u32 data) __attribute__ ((always_inline));
+inline int atomicRead(AtomicType *atomic) __attribute__ ((always_inline));
+inline int atomicSet(AtomicType *atomic,int data) __attribute__ ((always_inline));
 
-inline int atomicAdd(AtomicType *atomic,u32 data) __attribute__ ((always_inline));
-inline int atomicSub(AtomicType *atomic,u32 data) __attribute__ ((always_inline));
+inline int atomicAdd(AtomicType *atomic,int data) __attribute__ ((always_inline));
+inline int atomicSub(AtomicType *atomic,int data) __attribute__ ((always_inline));
 
-inline u32 atomicAddRet(AtomicType *atomic,u32 data) __attribute__ ((always_inline));
+inline int atomicAddRet(AtomicType *atomic,int data) __attribute__ ((always_inline));
+inline int atomicSubRet(AtomicType *atomic,int data) __attribute__ ((always_inline));
 
-inline u32 atomicRead(AtomicType *atomic)
+inline int atomicRead(AtomicType *atomic)
 {
    return atomic->data;
 }
-inline int atomicSet(AtomicType *atomic,u32 data) 
+inline int atomicSet(AtomicType *atomic,int data) 
 {
    return (atomic->data = data,0);
 }
 
-inline int atomicAdd(AtomicType *atomic,u32 data) 
+inline int atomicAdd(AtomicType *atomic,int data) 
 {
    asm volatile(
       "lock;addl %%ecx,(%%rax)"
@@ -32,7 +33,7 @@ inline int atomicAdd(AtomicType *atomic,u32 data)
    return 0;
 }
 
-inline int atomicSub(AtomicType *atomic,u32 data)
+inline int atomicSub(AtomicType *atomic,int data)
 {
    u8 ret;
    asm volatile(
@@ -43,13 +44,19 @@ inline int atomicSub(AtomicType *atomic,u32 data)
    );
    return !!(ret);
 }
-inline u32 atomicAddRet(AtomicType *atomic,u32 data)
+
+inline int atomicAddRet(AtomicType *atomic,int data)
 {
-   u32 __data;
+   int __data;
    asm volatile(
       "lock;xaddl %%ecx,(%%rax)"
       : "=c"(__data)
       : "a" (&atomic->data),"c" (data)
    );
    return data + __data;
+}
+
+inline int atomicSubRet(AtomicType *atomic,int data)
+{
+   return atomicAddRet(atomic,-data);
 }

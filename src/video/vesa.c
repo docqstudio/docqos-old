@@ -1,6 +1,6 @@
 #include <video/vesa.h>
 #include <core/const.h>
-#include <cpu/spinlock.h>
+#include <task/semaphore.h>
 #include <cpu/io.h>
 #include <lib/string.h>
 #include <memory/paging.h>
@@ -100,7 +100,7 @@ static VBEInfo currentVBEInfo = {};
 static VBEModeInfo currentVBEModeInfo = {};
 
 static u32 displayPosition = 0;
-static SpinLock displayPositionLock = {};
+static Semaphore displayLock = {};
 
 int initVESA(void)
 {
@@ -111,8 +111,7 @@ int initVESA(void)
       (const void *) (VBE_MODE_INFO_ADDRESS), /*from*/
       sizeof(VBEModeInfo)); /*n*/
       
-
-   initSpinLock(&displayPositionLock);  
+   initSemaphore(&displayLock);
 
    return 0; /*Successful.*/
 }
@@ -123,9 +122,7 @@ int fillRect(
    u32 color;
    u8 fill1,fill2,fill3;
    const u32 xRes = currentVBEModeInfo.xResolution;
-   u8 *vram = (u8 *)pa2va(currentVBEModeInfo.physBaseAddr);
-
-   vram += 3*x + 3*xRes*y;
+   u8 *vram;
 
    red >>= 8 - currentVBEModeInfo.redMaskSize;
    green >>= 8 - currentVBEModeInfo.greenMaskSize;
@@ -135,11 +132,16 @@ int fillRect(
    color |= green << currentVBEModeInfo.greenFieldPosition;
    color |= blue << currentVBEModeInfo.blueFieldPosition;
 
+   fill1 = (color >> 0) & 0xff;
+   fill2 = (color >> 8) & 0xff;
+   fill3 = (color >> 16) & 0xff;
 
-   fill1 = (color >> 0) & 0xFF;
-   fill2 = (color >> 8) & 0xFF;
-   fill3 = (color >> 16) & 0xFF;
-
+   u64 rflags = storeInterrupt();
+   closeInterrupt();
+      /*This code can't run if interrupts are started.Why????*/
+   vram = (u8 *)pa2va(currentVBEModeInfo.physBaseAddr);
+   vram += 3*x + 3*xRes*y;
+   
    for(int i = 0; i < width; ++i)
    {
       for(int j = 0; j < height; ++j)
@@ -149,7 +151,7 @@ int fillRect(
          *(vram + i*3 + j*xRes*3 + 2) = fill3;
       }
    }
-
+   restoreInterrupt(rflags);
    return 0;
 }
 
@@ -209,11 +211,7 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
    const u32 xRes = currentVBEModeInfo.xResolution;
    const u32 yRes = currentVBEModeInfo.yResolution;
 
-   u64 rflags;
-   lockSpinLockDisableInterrupt(&displayPositionLock,&rflags);
-   /*In fact,here will do lots of memory operations,so we shouldn't use spin lock.*/
-   /*But we don't have any better ways now.*/
-
+   downSemaphore(&displayLock);
    int x = displayPosition % xRes;
    int y = displayPosition / xRes;
 
@@ -261,7 +259,6 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
 
    displayPosition = y * xRes + x; /*Update the next display position.*/
 
-   unlockSpinLockRestoreInterrupt(&displayPositionLock,&rflags);
-
+   upSemaphore(&displayLock);
    return 0;
 }

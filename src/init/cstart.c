@@ -66,8 +66,6 @@ int kmain(void)
    if(initLocalTime())
       return -1;
 
-   doInitcalls();
-
    initTask();
    return 0;
 }
