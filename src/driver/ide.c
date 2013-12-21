@@ -5,6 +5,7 @@
 #include <lib/string.h>
 #include <cpu/io.h>
 #include <interrupt/interrupt.h>
+#include <task/task.h>
 
 typedef enum IDEDeviceType{
    InvalidIDEDevice,
@@ -231,7 +232,7 @@ static int ideReadATAPI(IDEDevice *device,u64 lba,u64 size,void *buf)
              /*Write and wait.*/
 
    if(ideWaitDRQ(primary))
-      return 0;
+      return -1;
 
    u16 sizeRead = ideInb(primary,IDE_REG_LBA1);
    sizeRead |= ideInb(primary,IDE_REG_LBA2) << 8;
@@ -457,7 +458,7 @@ static int ideEnable(Device *device)
 
          error = ideWaitDRQ(i);
          if(error)
-         { /*it is not an ata device if error.*/
+         { /*It is not an ata device if error.*/
            /*Maybe it is an atapi device. (Such as CD-ROM.)*/
             u8 cl = ideInb(i,IDE_REG_LBA1);
             u8 ch = ideInb(i,IDE_REG_LBA2);
@@ -492,6 +493,67 @@ static int ideDisable(Device *device)
    return 0;
 }
 
+static int cdromStatusCheck(IDEDevice *device)
+{
+   const int primary = device->primary;
+   const int master = device->master;
+   u8 cmd[12] = {0x25 /*Read Capacity.*/,0,0,0,0,0,0,0,0,0,0,0};
+
+   ideWaitReady(primary);
+   ideOutb(primary,IDE_REG_DEV_SEL,master << 4);
+   for(int i = 0;i < 4;++i) /*A little delay.*/
+     ideInb(primary,IDE_REG_CONTROL);
+   ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
+   ideOutb(primary,IDE_REG_LBA1,(0x08 & 0xff)); /*8 Bytes.*/ 
+   ideOutb(primary,IDE_REG_LBA2,((0x08 >> 8)) & 0xff);
+   ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET);
+
+   if(ideWaitDRQ(primary))
+      return -1; /*Return if error.*/
+
+   ideOutsw(primary,IDE_REG_DATA,6,cmd);
+             /*Write and wait.*/
+   
+   if(ideWaitDRQ(primary))
+      return 1; /*If error,this media is not inserted.*/
+   ideInsl(primary,IDE_REG_DATA,2,ideIOBuffer);
+   return 0; /*This media is inserted.*/
+}
+
+static int cdromTask(void *arg)
+{
+   IDEDevice *device = (IDEDevice *)arg;
+   int status = cdromStatusCheck(device);
+   int newStatus;
+   if(!status)
+   {
+      disablePreemption();
+      parseISO9660FileSystem(device);
+      printk("\n"); /*Parse it!*/
+      enablePreemption();
+   }
+   for(;;)
+   {
+      scheduleTimeout(1000); /*1 second.*/
+      newStatus = cdromStatusCheck(device);
+      if(status == newStatus)
+         continue; /*Status is changed?*/
+      status = newStatus;
+      switch(status)
+      {
+      case 0:
+         printk("CDROM inserted!!\n");
+         break;
+      case 1:
+         printk("CDROM ejected!!\n");
+         break;
+      default:
+         break;
+      }
+   }
+   return 0;
+}
+
 static int initIDE(void)
 {
    registerDriver(&ideDriver);
@@ -519,12 +581,8 @@ static int initIDE(void)
 
    return 1; /*No IDE CD-ROM device.*/
 found:
-   ;
-   int ret = parseISO9660FileSystem(device);
-          /*Parse it.*/
-   printk("\n");
- 
-   return (ret ? 1 : 0);
+   createKernelTask(&cdromTask,(void *)device);
+   return 0;
 }
 
 driverInitcall(initIDE);

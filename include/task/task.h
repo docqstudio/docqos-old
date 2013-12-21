@@ -34,19 +34,20 @@ typedef union TaskKernelStack
    Task task;
 } TaskKernelStack;
 
-typedef int (*KernelTask)(void);
+typedef int (*KernelTask)(void *arg);
 
 inline int enablePreemptionSchedule(void) __attribute__ ((always_inline));
 inline int enablePreemption(void) __attribute__ ((always_inline));
 inline int disablePreemption(void) __attribute__ ((always_inline));
 
 int schedule(void);
+int scheduleTimeout(int ms);
 Task *getCurrentTask(void);
 
 int doExit(int n) __attribute__ ((noreturn));
 int doFork(IRQRegisters *reg);
 
-int createKernelTask(KernelTask task);
+int createKernelTask(KernelTask task,void *arg);
 int wakeUpTask(Task *task);
 
 int initTask(void) __attribute__ ((noreturn));

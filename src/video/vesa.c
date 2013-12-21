@@ -4,6 +4,7 @@
 #include <cpu/io.h>
 #include <lib/string.h>
 #include <memory/paging.h>
+#include <video/console.h>
 
 typedef struct VBEInfo{
    u8 signature[4];
@@ -122,7 +123,7 @@ int fillRect(
    u32 color;
    u8 fill1,fill2,fill3;
    const u32 xRes = currentVBEModeInfo.xResolution;
-   u8 *vram;
+   volatile u8 *vram;
 
    red >>= 8 - currentVBEModeInfo.redMaskSize;
    green >>= 8 - currentVBEModeInfo.greenMaskSize;
@@ -136,7 +137,7 @@ int fillRect(
    fill2 = (color >> 8) & 0xff;
    fill3 = (color >> 16) & 0xff;
 
-   u64 rflags = storeInterrupt();
+   u64 rflags = storeInterrupt();(void)rflags;
    closeInterrupt();
       /*This code can't run if interrupts are started.Why????*/
    vram = (u8 *)pa2va(currentVBEModeInfo.physBaseAddr);
@@ -151,7 +152,7 @@ int fillRect(
          *(vram + i*3 + j*xRes*3 + 2) = fill3;
       }
    }
-   restoreInterrupt(rflags);
+  restoreInterrupt(rflags);
    return 0;
 }
 

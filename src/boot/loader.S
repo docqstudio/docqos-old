@@ -57,7 +57,6 @@ readKernelFailed: .ascii "Reading kernel failed!\n\r"
           .byte 0
 canNotGetMemoryInfo: .ascii "Can't get memory info!\n\r"
           .byte 0
-
 espSaved: .long 0x0
 eaxSaved: .long 0x0
 
@@ -137,7 +136,7 @@ entry32: .code16
    movw $goIntoProtectedMode,%bp
    call dispStrRM
 
-   call vbeInit
+   call scanVBEModes
    jc 1f
 
    sgdt (GDTR16) /*Save GDT in Real Mode.*/
@@ -264,51 +263,89 @@ driveSectorSize: .code16
    movw $0,%ax
    ret
 
-vbeInit: .code16
+scanVBEModes: .code16
    pushw %es
 
    movw $VBE_INFO_MEMORY_SEG,%ax
    movw %ax,%es
    movw $0x0,%di
    movw $0x4f00,%ax
-   int $0x10 /*Check support for VBE.*/
+   int $0x10 /*VBE exists?*/
    cmpw $0x4f,%ax
    jne 1f
 
    movw %es:4(%di),%ax
-   cmpw $0x0200,%ax /*VBE2.0 or more.*/
-   jb 1f
+   cmpw $0x0200,%ax
+   jb 1f /*Need VBE2.0 or higher version.*/
 
+   movl %es:14(%di),%eax
+   movw %ax,%di
+   shrl $16,%eax /*Get the address of ths VBE mode list.*/
+   movw %ax,%es
+
+2: /*label loop*/
+   movw %es:(%di),%ax
+   cmpw $0xffff,%ax
+   je 1f
+   addw $0x2,%di
+   call vbeModeTest /*Foreach the list and call vbeModeTest.*/
+   jc 2b
+
+   popw %es
+   clc
+   ret
+1: /*label error*/
+   popw %es
+   stc
+   ret
+
+vbeModeTest: .code16
+   pushw %es
+   pushw %di
+
+   pushw %ax
+
+   movw %ax,%cx
    movw $VBE_MODE_INFO_MEMORY_SEG,%ax
    movw %ax,%es
    movw $0x0,%di
-   movw $VBE_DEFAULT_MODE,%cx
    movw $0x4f01,%ax
-   int $0x10 /*Check support for VBE_DEFAULT_MODE.*/
+   int $0x10 /*This mode exists?*/
    cmpw $0x4f,%ax
    jne 1f
 
-   movw %es:0x0(%di),%ax
-   andw $0x90,%ax
-   cmpw $0x90,%ax
+   movw %es:0x12(%di),%ax
+   cmpw $VBE_MODE_XRES,%ax
    jne 1f
+   movw %es:0x14(%di),%ax
+   cmpw $VBE_MODE_YRES,%ax
+   jne 1f /*Resolution is VBE_MODE_XRES x VBE_MODE_YRES?*/
+
+   movw %es:0x0(%di),%ax
+   andw $0x80,%ax /*Framebuffer?*/
+   jz 1f
 
    movb %es:0x19(%di),%al
-   cmpb $0x18,%al
+   cmpb $0x18,%al /*24 bits per pixel?*/
    jne 1f
 
    movb %es:0x1b(%di),%al
-   cmpb $0x06,%al
+   cmpb $0x06,%al /*RBG?*/
    jne 1f
 
-   movw $(VBE_DEFAULT_MODE + 0x4000),%bx
+   popw %ax
+   addw $0x4000,%ax
+   movw %ax,%bx
    movw $0x4f02,%ax
-   int $0x10 /*Enable VBE_DEFAULT_MODE.*/
+   int $0x10 /*Enable this mode.*/
+   popw %di
    popw %es
 
    clc
    ret
 1: /*label error*/
+   popw %ax
+   popw %di
    popw %es
    stc
    ret
@@ -453,12 +490,12 @@ memcpy:.code32 /*Copy es:edi to ds:ebp (size:ecx).*/
    popl %eax
    ret
 
-dispStrRM: .code16 /*Display string(es:bp) in Real Mode.*/
+dispStrRM: .code16 /*Display string(ds:bp) in Real Mode.*/
                      /*It is the same as dispStr in boot.S*/
    movw $15,%bx
    movb $0xe,%ah
 1: /*label loop*/
-   movb %es:(%bp),%al
+   movb %ds:(%bp),%al
    cmpb $0,%al
    je 2f
    int $0x10
@@ -640,6 +677,7 @@ longMode: .code64
    call strlen
    movq $(KERNEL_ENTRY_ADDRESS + PAGE_OFFSET),%rax
    addq %rcx,%rax /*Now %rax is kernel's address.*/
+
 
 /************************************************/
    jmp *%rax  /*Go into kernel!!*/

@@ -8,6 +8,7 @@
 #include <cpu/spinlock.h>
 #include <lib/string.h>
 #include <interrupt/interrupt.h>
+#include <time/time.h>
 
 #define switchTo(prev,next) \
    asm volatile( \
@@ -59,12 +60,13 @@ static Task *allocTask(u64 rip)
 
 static Task *addTask(Task *ret)
 {
-   lockSpinLock(&scheduleLock);
+   u64 rflags;
+   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
 
    listAddTail(&ret->list,&tasks);
    listAddTail(&ret->sleepingList,&sleepingTasks);
 
-   unlockSpinLock(&scheduleLock);
+   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
 
    return ret;
 }
@@ -135,7 +137,7 @@ static int scheduleFirst(void)
 
 /*Define a task.*/
 #define TEST_TASK(name) \
-static int task##name(void)\
+static int task##name(void *arg __attribute__ ((unused)))\
 { \
    Task *cur = getCurrentTask(); \
    printk("Hi!I'm Task " #name ".My PID is %d.\n",cur->pid); \
@@ -163,16 +165,26 @@ static int idle(void)
    /*finishScheduling();*/
    /*Don't need to do this,because the idle task is scheduled by scheduleFirst.*/
 
-   doInitcalls();
+   if(doInitcalls())
+      goto end;
 
-   createKernelTask(taskA);
-   createKernelTask(taskB);
-   createKernelTask(taskC);
-   createKernelTask(taskD);
+   createKernelTask(taskA,0);
+   createKernelTask(taskB,0);
+   createKernelTask(taskC,0);
+   createKernelTask(taskD,0);
 
    startInterrupt();
-   
-   for(;;)schedule();
+  
+   schedule();
+end:
+   for(;;);
+   return 0;
+}
+
+static int scheduleTimeoutCallback(void *arg)
+{
+   Task *task = (Task *)arg;
+   wakeUpTask(task); /*Wake up this task and return.*/
    return 0;
 }
 
@@ -194,7 +206,7 @@ int finishScheduling(void) /*It will be called in retFromFork,schedule etc.*/
    Task *cur = getCurrentTask();
    if(cur->preemption == 0) /*First run.*/
       disablePreemption(); /*It will be enabled when we unlock spin lock.*/
-   unlockSpinLock(&scheduleLock);
+   unlockSpinLockEnableInterrupt(&scheduleLock);
    return 0;
 }
 
@@ -205,7 +217,8 @@ int schedule(void)
       return 0; 
    Task *next = 0;
 
-   lockSpinLock(&scheduleLock);
+   u64 rflags;
+   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
    /*If we schedule successfully,it will be unlocked in finishScheduling.*/
 
    if(!listEmpty(&sleepingTasks))
@@ -213,19 +226,40 @@ int schedule(void)
       next = listEntry(sleepingTasks.next,Task,sleepingList);
       listDelete(&next->sleepingList);
    }else if((prev->state == TaskRunning)){
-      unlockSpinLock(&scheduleLock);
+      unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
       return 0;
    }else
       next = idleTask;
 
    if(next == prev)
    {
-      unlockSpinLock(&scheduleLock);
+      unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
       return 0;
    }
    switchTo(prev,next);
 
    finishScheduling();
+   return 0;
+}
+
+int scheduleTimeout(int ms)
+{
+   Timer timer;
+   Task *current = getCurrentTask();
+
+   ms /= (MSEC_PER_SEC / TIMER_HZ);
+   if(!ms) /*Milliseconds to ticks.*/
+      ms = 1;
+   initTimer(&timer,&scheduleTimeoutCallback,ms,(void *)current);
+             /*Init a timer.*/
+   disablePreemption();
+           /*When we set current's state and add timer,this task can't be scheduled.*/
+   current->state = TaskStopping; /*If it is scheduled,never return.*/
+   addTimer(&timer);
+   
+   enablePreemption();
+   
+   schedule();
    return 0;
 }
 
@@ -265,21 +299,22 @@ int doExit(int n)
          "IDLE Task Called Exit!!!\n\n");
       for(;;); /*IDLE Task should never be exited.*/
    }
-   lockSpinLock(&scheduleLock);
+   u64 rflags;
+   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
 
    lockSpinLock(&current->lock);
    current->state = TaskExited;
       /*This task will really be destoried in __switchTo.*/
    unlockSpinLock(&current->lock);
 
-   unlockSpinLock(&scheduleLock);
+   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
    
    schedule();
 
    for(;;);
 }
 
-int createKernelTask(KernelTask task)
+int createKernelTask(KernelTask task,void *arg)
 {
    int kernelTaskHelper(void); /*Fork.S .*/
 
@@ -293,6 +328,7 @@ int createKernelTask(KernelTask task)
    regs.rbx = (u64)(pointer)task;
    regs.rip = (u64)(pointer)kernelTaskHelper;
       /*See also fork.S .*/
+   regs.rdi = (u64)(pointer)arg;
 
    regs.rflags = storeInterrupt();
    doFork(&regs);
@@ -302,7 +338,8 @@ int createKernelTask(KernelTask task)
 
 int wakeUpTask(Task *task)
 {
-   lockSpinLock(&scheduleLock);
+   u64 rflags;
+   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
    lockSpinLock(&task->lock);
 
    do{
@@ -313,7 +350,7 @@ int wakeUpTask(Task *task)
    }while(0);
 
    unlockSpinLock(&task->lock);
-   unlockSpinLock(&scheduleLock);
+   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
    return 0;
 }
 

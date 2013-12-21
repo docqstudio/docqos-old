@@ -41,7 +41,7 @@ int kmain(void)
    initPaging();
 
    initVESA(); /*Init vesa.*/
-
+ 
    printkInColor(0x00,0xFF,0x00, /*Green.*/
       "------------------kmain started------------------\n");
    printk("Initialize VESA successfully.\n");

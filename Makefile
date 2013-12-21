@@ -17,6 +17,9 @@ brun:first
 
 clean:dir_src_clean
 
+clean_all:clean
+	$(RM) bin/*.bin bin/kernel parport.out os.iso map.map bochsout.txt 
+
 dir_src_clean:
 	cd src && $(MAKE) -f Makefile clean
 

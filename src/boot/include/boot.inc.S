@@ -21,8 +21,9 @@
                                               /*Offset = 0x0.*/
 .set VBE_MODE_INFO_MEMORY_SEG      , 0x9000   /*The memory of vbe mode information.(seg)*/
                                               /*Offset = 0x0.*/
-.set VBE_DEFAULT_MODE     , 0x118    /*The default mode of VBE modes.*/
-
+.set VBE_MODE_XRES                 , 1024  /*X Res of VBE Mode we want.*/
+.set VBE_MODE_YRES                 , 768   /*Y Res of VBE Mode we want.*/
+                                     /*1024 * 768 * 32.*/
 .set MEMORY_INFO_NUMBER_MEMORY_SEG , 0x7000 /*The memory of the number of memory info.(seg)*/
                                             /*Offset = 0x0*/
 .set MEMORY_INFO_MEMORY_SEG        , 0x7001 /*The memory of memory info. (seg)*/

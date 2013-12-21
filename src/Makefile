@@ -94,11 +94,13 @@ cachedir:
 	    ../include/core/list.h ../include/cpu/spinlock_types.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/time.o:time/time.c ../include/core/const.h ../include/time/time.h ../include/time/hpet.h \
-            ../include/video/console.h ../include/interrupt/interrupt.h
+            ../include/video/console.h ../include/interrupt/interrupt.h ../include/core/list.h \
+	    ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/cpu/io.h \
+	    ../include/memory/kmalloc.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/localtime.o:time/localtime.c ../include/core/const.h ../include/interrupt/interrupt.h \
                  ../include/time/localtime.h ../include/video/console.h ../include/interrupt/localapic.h \
-		 ../include/cpu/io.h
+		 ../include/cpu/io.h ../include/core/list.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/pit.o:time/pit.c ../include/core/const.h ../include/interrupt/interrupt.h ../include/cpu/io.h \
            ../include/video/console.h ../include/time/pit.h
@@ -108,7 +110,8 @@ cachedir:
 .obj/task.o:task/task.c ../include/core/const.h ../include/cpu/io.h ../include/task/task.h \
             ../include/video/console.h ../include/core/list.h ../include/cpu/spinlock.h \
 	    ../include/memory/buddy.h ../include/cpu/atomic.h ../include/lib/string.h \
-	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h 
+	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h \
+	    ../include/time/time.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/fork.o:task/fork.S
 	$(AS) $(ASFLAGS) -o $@ $<
@@ -121,7 +124,8 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/ide.o:driver/ide.c ../include/core/const.h ../include/video/console.h ../include/driver/driver.h \
             ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
-	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h ../include/interrupt/interrupt.h
+	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h ../include/interrupt/interrupt.h \
+	    ../include/task/task.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/semaphore.o: task/semaphore.c ../include/core/const.h ../include/task/semaphore.h \
                   ../include/task/waitqueue.h ../include/task/task.h ../include/core/list.h \

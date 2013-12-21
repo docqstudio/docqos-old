@@ -98,16 +98,17 @@ inline int startInterrupt(void)
    asm volatile("sti");
    return 0;
 }
+
 inline u64 storeInterrupt(void) 
 {
-   u64 ret;
+   volatile u64 ret;
    asm volatile(
       "pushfq\n\t"
       "popq %%rax"
       :"=a"(ret));
    return ret;
-
 }
+
 inline int restoreInterrupt(u64 rflags) 
 {
    asm volatile(
