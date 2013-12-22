@@ -10,11 +10,11 @@ IRQHandler localApicTimerHandler = 0;
 
 #define END_LOOPS                  20
 
-static volatile int loops = 0;                   /* \ */
-static unsigned long long startTicks = 0;        /* | */
-static unsigned long long endTicks   = 0;        /* | Only use in kernel init.*/
-                                                 /* | */
-static int calcFreqInterrupt(IRQRegisters *reg)   /* / */
+static volatile int loops = 0;                               /* \ */
+static unsigned long long startTicks = 0;                    /* | */
+static unsigned long long endTicks   = 0;                    /* | Only use in kernel init.*/
+                                                             /* | */
+static int calcFreqInterrupt(IRQRegisters *reg,void *data)   /* / */
 {
    switch(loops)
    {
@@ -30,7 +30,7 @@ static int calcFreqInterrupt(IRQRegisters *reg)   /* / */
    return 0;
 }
 
-static int localTimeInterrupt(IRQRegisters *reg)
+static int localTimeInterrupt(IRQRegisters *reg,void *data)
 {
    return 1;/*Schedule.*/
 }

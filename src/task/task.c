@@ -137,7 +137,7 @@ static int scheduleFirst(void)
 
 /*Define a task.*/
 #define TEST_TASK(name) \
-static int task##name(void *arg __attribute__ ((unused)))\
+/*static*/ int task##name(void *arg __attribute__ ((unused)))\
 { \
    Task *cur = getCurrentTask(); \
    printk("Hi!I'm Task " #name ".My PID is %d.\n",cur->pid); \
@@ -213,8 +213,6 @@ int finishScheduling(void) /*It will be called in retFromFork,schedule etc.*/
 int schedule(void)
 {
    Task *prev = getCurrentTask();
-   if(prev->preemption)
-      return 0; 
    Task *next = 0;
 
    u64 rflags;
@@ -246,21 +244,26 @@ int scheduleTimeout(int ms)
 {
    Timer timer;
    Task *current = getCurrentTask();
+   unsigned long long expire;
 
    ms /= (MSEC_PER_SEC / TIMER_HZ);
    if(!ms) /*Milliseconds to ticks.*/
       ms = 1;
    initTimer(&timer,&scheduleTimeoutCallback,ms,(void *)current);
              /*Init a timer.*/
+   expire = timer.ticks;
    disablePreemption();
            /*When we set current's state and add timer,this task can't be scheduled.*/
    current->state = TaskStopping; /*If it is scheduled,never return.*/
    addTimer(&timer);
    
    enablePreemption();
-   
    schedule();
-   return 0;
+
+   removeTimer(&timer);
+   expire -= getTicks();
+   expire = (expire > 0) ? expire : 0;
+   return expire;
 }
 
 int doFork(IRQRegisters *regs)

@@ -8,9 +8,10 @@ typedef struct IRQRegisters{
    u64 rip,cs,rflags,rsp,ss; /*CPU pushed them.*/
 } __attribute__ ((packed)) IRQRegisters;
 
-typedef int (*IRQHandler)(IRQRegisters *reg);
+typedef int (*IRQHandler)(IRQRegisters *reg,void *data);
 
 int initInterrupt(void);
 
 int requestIRQ(u8 irq,IRQHandler handler);
+int setIRQData(u8 irq,void *data);
 int freeIRQ(u8 irq);

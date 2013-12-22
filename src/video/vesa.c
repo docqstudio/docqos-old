@@ -4,7 +4,6 @@
 #include <cpu/io.h>
 #include <lib/string.h>
 #include <memory/paging.h>
-#include <video/console.h>
 
 typedef struct VBEInfo{
    u8 signature[4];
@@ -137,9 +136,6 @@ int fillRect(
    fill2 = (color >> 8) & 0xff;
    fill3 = (color >> 16) & 0xff;
 
-   u64 rflags = storeInterrupt();(void)rflags;
-   closeInterrupt();
-      /*This code can't run if interrupts are started.Why????*/
    vram = (u8 *)pa2va(currentVBEModeInfo.physBaseAddr);
    vram += 3*x + 3*xRes*y;
    
@@ -152,7 +148,6 @@ int fillRect(
          *(vram + i*3 + j*xRes*3 + 2) = fill3;
       }
    }
-  restoreInterrupt(rflags);
    return 0;
 }
 
@@ -189,7 +184,7 @@ static int screenUp(int numberOfLine)
 {
    if(numberOfLine == 0)
       return 0;
-   u8 *vram = (u8 *)(pointer)pa2va(currentVBEModeInfo.physBaseAddr);
+   volatile u8 *vram = (u8 *)(pointer)pa2va(currentVBEModeInfo.physBaseAddr);
    const u32 xRes = currentVBEModeInfo.xResolution;
    const u32 yRes = currentVBEModeInfo.yResolution;
    const u32 vramSize = xRes*yRes*3;
@@ -202,7 +197,6 @@ static int screenUp(int numberOfLine)
    fillRect(0x00,0x00,0x00, /*Black.*/
       0x0,yRes - numberOfLine*FONT_DISPLAY_HEIGHT, /*X and Y.*/
       xRes,numberOfLine*FONT_DISPLAY_HEIGHT /*Width and height.*/);
-
    return 0;
 }
 
@@ -213,6 +207,8 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
    const u32 yRes = currentVBEModeInfo.yResolution;
 
    downSemaphore(&displayLock);
+   disablePreemption(); 
+     /*Can't run if preemption is enabled? Why????*/
    int x = displayPosition % xRes;
    int y = displayPosition / xRes;
 
@@ -260,6 +256,7 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
 
    displayPosition = y * xRes + x; /*Update the next display position.*/
 
+   enablePreemption();
    upSemaphore(&displayLock);
    return 0;
 }

@@ -20,6 +20,7 @@ typedef enum IDEDeviceSubType{
 
 typedef struct IDEPort{
    u16 base,ctrl;
+   u16 busMasterIDE;
    u8 irq;
 } IDEPort;
 
@@ -31,6 +32,12 @@ typedef struct IDEDevice{
    /*Primary is if this device is primary.*/
    /*Master is if this device is master.*/
 } IDEDevice;
+
+typedef struct IDEInterruptWait{
+   u8 primary;
+   Task *task;
+   u8 status;
+} IDEInterruptWait;
 
 /*IDE in PCI.*/
 #define IDE_PCI_CLASS                0x01010000
@@ -49,7 +56,9 @@ typedef struct IDEDevice{
 #define IDE_REG_DEV_SEL              0x06
 #define IDE_REG_STATUS               0x07
 #define IDE_REG_COMMAND              0x07
-#define IDE_REG_CONTROL              0x08
+#define IDE_REG_BMCOMMAND            0x08
+#define IDE_REG_BMSTATUS             0x0a
+#define IDE_REG_CONTROL              0xff
 
 /*ATA commands.*/
 #define IDE_CMD_IDENTIFY             0xec
@@ -69,9 +78,19 @@ typedef struct IDEDevice{
 
 #define ATAPI_SECTOR_SIZE            0x800 /*2048.*/
 
+/*The IRQ vector of IDE.*/
+#define IDE_PRIMARY_IRQ              14
+#define IDE_SECONDARY_IRQ            15
+
+/*Bus Master IDE status register.*/
+#define IDE_BMSTATUS_INTERRUPT       0x4
+
 static int ideDisable(Device *device);
 static int ideProbe(Device *device);
 static int ideEnable(Device *device);
+static int cdromTask(void *arg);
+static int ideIRQPrimary(IRQRegisters *reg,void *data);
+static int ideIRQSecondary(IRQRegisters *reg,void *data);
 
                          /*Is primary?*/
 static inline int ideOutb(u8 device,u8 reg,u8 data) __attribute__ ((always_inline));
@@ -102,6 +121,8 @@ static inline int ideOutb(u8 device,u8 reg,u8 data)
 
    if(reg < 0x08)
       outb(port->base + reg,data);
+   else if(reg < 0x10)
+      outb(port->busMasterIDE + reg - 0x08,data);
    else
       outb(port->ctrl,data);
           /*Cntrol regsiter.*/
@@ -114,9 +135,11 @@ static inline int ideOutl(u8 device,u8 reg,u32 data)
    IDEPort *port = &ports[device];
 
    if(reg < 0x08)
-      outb(port->base + reg,data);
+      outl(port->base + reg,data);
+   else if(reg < 0x10)
+      outl(port->busMasterIDE + reg - 0x08,data);
    else
-      outb(port->ctrl,data);
+      outl(port->ctrl,data);
 
    return 0;
 }
@@ -127,6 +150,8 @@ static inline int ideOutsw(u8 device,u8 reg,u64 size,void *buf)
    
    if(reg < 0x8)
       outsw(port->base + reg,size,buf);
+   else if(reg < 0x10)
+      outsw(port->busMasterIDE + reg - 0x08,size,buf);
    else
       outsw(port->ctrl,size,buf);
 
@@ -139,8 +164,10 @@ static inline u8 ideInb(u8 device,u8 reg)
    IDEPort *port = &ports[device];
    u8 ret;
 
-   if(reg < 0x8)
+   if(reg < 0x08)
       ret = inb(port->base + reg);
+   else if(reg < 0x10)
+      ret = inb(port->busMasterIDE + reg - 0x08);
    else
       ret = inb(port->ctrl);
 
@@ -150,9 +177,11 @@ static inline u8 ideInb(u8 device,u8 reg)
 static inline int ideInsl(u8 device,u8 reg,u64 size,void *buf)
 {
    IDEPort *port = &ports[device];
-   
+  
    if(reg < 0x8)
       insl(port->base + reg,size,buf);
+   else if(reg < 0x10)
+      insl(port->busMasterIDE + reg - 0x08,size,buf);
    else
       insl(port->ctrl,size,buf);
 
@@ -165,6 +194,8 @@ static inline int ideInsw(u8 device,u8 reg,u64 size,void *buf)
 
    if(reg < 0x8)
       insw(port->base + reg,size,buf);
+   else if(reg < 0x10)
+      insw(port->busMasterIDE + reg - 0x08,size,buf);
    else
       insw(port->ctrl,size,buf);
 
@@ -175,10 +206,12 @@ static int ideWaitReady(u8 device)
 {
    u8 status;
    
-   do{
+   for(;;){
       status = ideInb(device,IDE_REG_STATUS);
-   }while(status & IDE_STATUS_BUSY);
-          /*Busy waiting until busy status is cleared.*/
+      if(!(status & IDE_STATUS_BUSY))
+         break;
+      schedule();
+   }
 
    return 0;
 }
@@ -196,25 +229,49 @@ static int ideWaitDRQ(u8 device)
       }
       if((!(status & IDE_STATUS_BUSY)) && (status & IDE_STATUS_DRQ))
          break;
-   } /*Busy waiting,too.*/
+      schedule(); /*Give time to other tasks.*/
+   }
    return error;
+}
+
+static int ideWaitInterrupt(IDEInterruptWait *wait,IDEDevice *device)
+{ /*When we called this function,preemption is disabled.*/
+   u8 irq = 
+      (device->primary == IDE_PRIMARY) ? IDE_PRIMARY_IRQ : IDE_SECONDARY_IRQ;
+         /*IRQ vector of device.*/
+   Task *current = getCurrentTask();
+   wait->task = current;
+   wait->primary = device->primary; /*Init wait.*/
+   current->state = TaskStopping;
+   setIRQData(irq,(void *)wait); /*Stop current task and set IRQ data.*/
+   return 0;
+}
+
+static int ideWaitInterruptEnd(IDEDevice *device)
+{
+   u8 irq = 
+      (device->primary == IDE_PRIMARY) ? IDE_PRIMARY_IRQ : IDE_SECONDARY_IRQ;
+   setIRQData(irq,0);
+   return 0;
 }
 
 static int ideReadATAPI(IDEDevice *device,u64 lba,u64 size,void *buf)
 {
+   IDEInterruptWait wait;
    const u8 primary = device->primary;
    const u8 master = device->master;
    u8 cmd[12] = {0xa8 /*READ (12).*/,0,0,0,0,0,0,0,0,0,0,0};
       /*SCSI Command.*/
 
-   ideWaitReady(primary);
+   ideWaitReady(primary); /*Wait for this device ready.*/
    ideOutb(primary,IDE_REG_DEV_SEL,master << 4);
    for(int i = 0;i < 4;++i) /*A little delay.*/
      ideInb(primary,IDE_REG_CONTROL);
+   ideOutb(primary,IDE_REG_CONTROL,IDE_ENABLE_IRQ); /*Enable IRQs.*/
    ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
    ideOutb(primary,IDE_REG_LBA1,(ATAPI_SECTOR_SIZE & 0xff)); 
    ideOutb(primary,IDE_REG_LBA2,((ATAPI_SECTOR_SIZE >> 8)) & 0xff);
-   ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET);
+   ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET); /*Send command.*/
 
    if(ideWaitDRQ(primary))
       return -1; /*Return if error.*/
@@ -228,8 +285,13 @@ static int ideReadATAPI(IDEDevice *device,u64 lba,u64 size,void *buf)
    cmd[4] = (lba >> 0x08) & 0xff;
    cmd[5] = (lba >> 0x00) & 0xff; /*Set this scsi command.*/
 
+   disablePreemption();
+   ideWaitInterrupt(&wait,device);
    ideOutsw(primary,IDE_REG_DATA,6,cmd);
-             /*Write and wait.*/
+   enablePreemption();
+   schedule();
+             /*Write and wait for an IRQ.*/
+   ideWaitInterruptEnd(device);
 
    if(ideWaitDRQ(primary))
       return -1;
@@ -237,7 +299,13 @@ static int ideReadATAPI(IDEDevice *device,u64 lba,u64 size,void *buf)
    u16 sizeRead = ideInb(primary,IDE_REG_LBA1);
    sizeRead |= ideInb(primary,IDE_REG_LBA2) << 8;
 
+   disablePreemption();
+   ideWaitInterrupt(&wait,device); 
    ideInsw(primary,IDE_REG_DATA,sizeRead / 2,buf);
+                   /*Read data.*/
+   enablePreemption();
+   schedule();  /*Wait for another IRQ.*/
+   ideWaitInterruptEnd(device); 
 
    return 0;
 }
@@ -406,6 +474,7 @@ static int parseISO9660FileSystem(IDEDevice *device)
    
    return parseISO9660FileSystemDir(device,lba,buf8,0);
 }
+
 static int ideProbe(Device *device)
 {
    if(ports[0].base)
@@ -427,9 +496,11 @@ static int ideEnable(Device *device)
 
    ports[IDE_PRIMARY  ].base = pci->bar[0] ? : 0x1f0;
    ports[IDE_PRIMARY  ].ctrl = pci->bar[1] ? : 0x3f4;
+   ports[IDE_PRIMARY  ].busMasterIDE = (pci->bar[4] & 0xfffffffc) + 0;
 
    ports[IDE_SECONDARY].base = pci->bar[2] ? : 0x170;
    ports[IDE_SECONDARY].ctrl = pci->bar[3] ? : 0x374;
+   ports[IDE_SECONDARY].busMasterIDE = (pci->bar[4] & 0xfffffffc) + 8;
 
    ideOutb(IDE_PRIMARY  ,IDE_REG_CONTROL,IDE_DISABLE_IRQ);
    ideOutb(IDE_SECONDARY,IDE_REG_CONTROL,IDE_DISABLE_IRQ);
@@ -480,9 +551,17 @@ static int ideEnable(Device *device)
          
          ideParseIdentifyData(&ideDevices[i][j],type,ideIOBuffer);
             /*Read and parse it.*/
+         if(ideDevices[i][j].subType == IDEDeviceSubTypeCDROM)
+         {
+            parseISO9660FileSystem(&ideDevices[i][j]);
+                  /*Parse it!*/
+            createKernelTask(&cdromTask,&ideDevices[i][j]);
+         }
       }
    }
-
+   requestIRQ(IDE_PRIMARY_IRQ,&ideIRQPrimary);
+   requestIRQ(IDE_SECONDARY_IRQ,&ideIRQSecondary); 
+      /*Request these IRQs.*/
    return 0;
 }
 
@@ -490,11 +569,16 @@ static int ideDisable(Device *device)
 {
    memset(ports,0,sizeof(ports));
      /*Only memset it.*/
+   freeIRQ(IDE_PRIMARY_IRQ);
+   freeIRQ(IDE_SECONDARY_IRQ);
    return 0;
 }
 
 static int cdromStatusCheck(IDEDevice *device)
 {
+   disablePreemption();
+
+   IDEInterruptWait wait;
    const int primary = device->primary;
    const int master = device->master;
    u8 cmd[12] = {0x25 /*Read Capacity.*/,0,0,0,0,0,0,0,0,0,0,0};
@@ -503,6 +587,7 @@ static int cdromStatusCheck(IDEDevice *device)
    ideOutb(primary,IDE_REG_DEV_SEL,master << 4);
    for(int i = 0;i < 4;++i) /*A little delay.*/
      ideInb(primary,IDE_REG_CONTROL);
+   ideOutb(primary,IDE_REG_CONTROL,IDE_ENABLE_IRQ);
    ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
    ideOutb(primary,IDE_REG_LBA1,(0x08 & 0xff)); /*8 Bytes.*/ 
    ideOutb(primary,IDE_REG_LBA2,((0x08 >> 8)) & 0xff);
@@ -511,12 +596,24 @@ static int cdromStatusCheck(IDEDevice *device)
    if(ideWaitDRQ(primary))
       return -1; /*Return if error.*/
 
-   ideOutsw(primary,IDE_REG_DATA,6,cmd);
-             /*Write and wait.*/
+   ideWaitInterrupt(&wait,device);
    
+   ideOutsw(primary,IDE_REG_DATA,6,cmd);
+             /*Write and wait for an IRQ.*/
+   schedule();
+   ideWaitInterruptEnd(device);
+
    if(ideWaitDRQ(primary))
       return 1; /*If error,this media is not inserted.*/
-   ideInsl(primary,IDE_REG_DATA,2,ideIOBuffer);
+   
+   ideWaitInterrupt(&wait,device);
+   
+   ideInsl(primary,IDE_REG_DATA,2,ideIOBuffer); /*Read data.*/
+
+   schedule(); /*Wait for another IRQ.*/
+   ideWaitInterruptEnd(device);
+
+   enablePreemption();
    return 0; /*This media is inserted.*/
 }
 
@@ -525,13 +622,6 @@ static int cdromTask(void *arg)
    IDEDevice *device = (IDEDevice *)arg;
    int status = cdromStatusCheck(device);
    int newStatus;
-   if(!status)
-   {
-      disablePreemption();
-      parseISO9660FileSystem(device);
-      printk("\n"); /*Parse it!*/
-      enablePreemption();
-   }
    for(;;)
    {
       scheduleTimeout(1000); /*1 second.*/
@@ -539,7 +629,7 @@ static int cdromTask(void *arg)
       if(status == newStatus)
          continue; /*Status is changed?*/
       status = newStatus;
-      switch(status)
+      switch(status) /*Print some information.*/
       {
       case 0:
          printk("CDROM inserted!!\n");
@@ -554,34 +644,41 @@ static int cdromTask(void *arg)
    return 0;
 }
 
+static int ideIRQCommon(int primary,IDEInterruptWait *wait)
+{
+   if(wait)
+      if(wait->primary != primary)
+         return -1; /*It should never arrive here.*/
+   u8 busMasterIDEStatus = ideInb(primary,IDE_REG_BMSTATUS);
+   u8 status = ideInb(primary,IDE_REG_STATUS); /*Get status.*/
+   if(!(busMasterIDEStatus & IDE_BMSTATUS_INTERRUPT))
+      return -1; 
+   ideOutb(primary,IDE_REG_BMSTATUS,IDE_BMSTATUS_INTERRUPT);
+   ideOutb(primary,IDE_REG_BMCOMMAND,0x0);
+
+   if(wait)
+   {
+      wait->status = status; /*Wake up the task that is waiting.*/
+      wakeUpTask(wait->task);
+   }
+   return 0;
+}
+
+static int ideIRQPrimary(IRQRegisters *reg,void *data)
+{
+   ideIRQCommon(IDE_PRIMARY,(IDEInterruptWait *)data);
+   return 0; /*Just call ideIRQCommon.*/
+}
+
+static int ideIRQSecondary(IRQRegisters *reg,void *data)
+{
+   ideIRQCommon(IDE_SECONDARY,(IDEInterruptWait *)data);
+   return 0;
+}
+
 static int initIDE(void)
 {
    registerDriver(&ideDriver);
-   if(ports[0].base == 0) /*No device?*/
-      return 1;
-
-   IDEDevice *device = 0;
-   for(int i = 0;i < sizeof(ideDevices)/sizeof(ideDevices[0]);++i)
-   {
-      for(int j = 0;j < sizeof(ideDevices[0])/sizeof(ideDevices[0][0]);++j)
-      {
-         device = &ideDevices[i][j];
-         if(device->type == IDEDeviceTypeATAPI)
-            if(device->subType == IDEDeviceSubTypeCDROM)
-            {
-               /*Found an CD-ROM device.*/
-               printkInColor(0x00,0xff,0x00,
-                  "Found IDE ATAPI CDROM Device,");
-               printkInColor(0x00,0xff,0x00,
-                  "Position:%d,%d,%d,%d\n",i,j,device->primary,device->master);
-               goto found;
-            }
-      }
-   }
-
-   return 1; /*No IDE CD-ROM device.*/
-found:
-   createKernelTask(&cdromTask,(void *)device);
    return 0;
 }
 

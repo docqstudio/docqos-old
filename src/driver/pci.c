@@ -105,7 +105,6 @@ static int parseFunction(u16 bus,u16 device,u16 function)
    printk("Class Type:%s,",classes[class]);
    printk("Sub Class:%d\n",subClass);
    /*Print some information.*/
-
    return 0;
 }
 

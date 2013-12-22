@@ -39,9 +39,11 @@ typedef int (*KernelTask)(void *arg);
 inline int enablePreemptionSchedule(void) __attribute__ ((always_inline));
 inline int enablePreemption(void) __attribute__ ((always_inline));
 inline int disablePreemption(void) __attribute__ ((always_inline));
+inline int preemptionSchedule(void) __attribute__ ((always_inline));
 
 int schedule(void);
 int scheduleTimeout(int ms);
+   /*Return 0 if timeout.*/
 Task *getCurrentTask(void);
 
 int doExit(int n) __attribute__ ((noreturn));
@@ -67,10 +69,19 @@ inline int enablePreemption(void)
      --current->preemption;
    return 0;
 }
+
 inline int disablePreemption(void)
 {
    Task *current = getCurrentTask();
    if(current)
      ++current->preemption;
    return 0;
+}
+
+inline int preemptionSchedule(void)
+{
+   Task *current = getCurrentTask();
+   if(current->preemption)
+      return 0;
+   return schedule();
 }

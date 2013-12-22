@@ -8,16 +8,20 @@
 #include <interrupt/ioapic.h>
 #include <task/task.h>
 
+typedef struct IRQInformation{
+   IRQHandler handler;
+   void *data;
+} IRQInformation;
+
 extern IRQHandler localApicTimerHandler;
 
-static IRQHandler irqHandlerTable[IRQ_COUNT] = {
-   [0 ... IRQ_COUNT - 1] = 0
-}; 
+static IRQInformation irqHandlerTable[IRQ_COUNT] = {}; 
 
 int doIRQ(IRQRegisters *reg)
 {
    localApicSendEOI(); /*Send EOI to local APIC.*/
    int ret;
+   IRQInformation *info;
    switch(reg->irq)
    {
    case LOCAL_TIMER_INT: /*Local APIC Timer Interrupt?*/
@@ -26,7 +30,7 @@ int doIRQ(IRQRegisters *reg)
          return 0;
       startInterrupt();
       
-      ret = localApicTimerHandler(reg);
+      ret = (*localApicTimerHandler)(reg,0);
 
       closeInterrupt();
       setupLocalApicTimer(0,0); /*Enable.*/
@@ -34,11 +38,12 @@ int doIRQ(IRQRegisters *reg)
    default:
       ioApicDisableIRQ((u8)reg->irq);
 
-      if(irqHandlerTable[reg->irq] == 0)
+      info = &irqHandlerTable[reg->irq];
+      if(info->handler == 0)
          return 0; /*We needn't to enable this IRQ,it should be disabled.*/
       startInterrupt();
 
-      ret = (irqHandlerTable[reg->irq])(reg);
+      ret = (*info->handler)(reg,info->data);
 
       closeInterrupt();
       ioApicEnableIRQ((u8)reg->irq); /*Enable this irq.*/
@@ -46,7 +51,7 @@ int doIRQ(IRQRegisters *reg)
    }
    if(ret == 1)/*Need schedule.*/
    {
-      schedule();
+      preemptionSchedule();
       closeInterrupt();
    }
    return ret;
@@ -56,14 +61,25 @@ int requestIRQ(u8 irq,IRQHandler handler)
 {
    if(irq > IRQ_COUNT)
       return -1;
-   if(irqHandlerTable[irq])
+   if(irqHandlerTable[irq].handler)
       return -1;
-   irqHandlerTable[irq] = handler;
+   irqHandlerTable[irq].handler = handler;
+   irqHandlerTable[irq].data = 0;
    if(ioApicEnableIRQ(irq))
    {
-      irqHandlerTable[irq] = 0;
+      irqHandlerTable[irq].handler = 0;
       return -1; /*Can't enable this IRQ,restore irqHandlerTable.*/
    }
+   return 0;
+}
+
+int setIRQData(u8 irq,void *data)
+{
+   if(irq > IRQ_COUNT)
+      return -1;
+   if(!irqHandlerTable[irq].handler)
+      return -1;
+   irqHandlerTable[irq].data = data;
    return 0;
 }
 
@@ -71,7 +87,8 @@ int freeIRQ(u8 irq)
 {
    if(irq > IRQ_COUNT)
       return -1;
-   irqHandlerTable[irq] = 0;
+   irqHandlerTable[irq].handler = 0;
+   irqHandlerTable[irq].data = 0;
    return ioApicDisableIRQ(irq);
 }
 
@@ -85,6 +102,12 @@ int initInterrupt(void)
 
    if(initIOApic())
       return -1;
+
+   for(int i = 0;i < IRQ_COUNT;++i)
+   {
+      irqHandlerTable[i].handler = 0;
+      irqHandlerTable[i].data = 0;
+   }
 
    printkInColor(0x00,0xff,0x00,"Initialize interrupt successfully!\n\n");
    return 0;

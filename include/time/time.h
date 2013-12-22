@@ -20,7 +20,7 @@ int initTimer(Timer *timer,
 Timer *createTimer(TimerCallBackFunction callback,
    int timeout,void *data);
 int addTimer(Timer *timer);
-
+int removeTimer(Timer *timer);
 
 unsigned long long getTicks(void);
 

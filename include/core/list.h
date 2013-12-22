@@ -52,7 +52,7 @@ inline int listDelete(ListHead *del)
    ListHead *next = del->next;
    next->prev = prev;
    prev->next = next;
-   del->prev = del->next = 0;
+   del->prev = del->next = del;
    return 0;
 }
 

@@ -13,7 +13,7 @@ static ListHead timers;
 static SpinLock timerLock;
 static unsigned long long ticks = 0;
 
-static int timeInterrupt(IRQRegisters *reg)
+static int timeInterrupt(IRQRegisters *reg,void *data)
 {
    u64 rflags;
    ++ticks;
@@ -31,8 +31,6 @@ static int timeInterrupt(IRQRegisters *reg)
       unlockSpinLockRestoreInterrupt(&timerLock,&rflags);
       
       (*timer->callback)(timer->data); /*Call callback.*/
-      if(!timer->onStack)
-         kfree(timer); /*If it created by createTimer,kfree it.*/
    }
 
    unlockSpinLockRestoreInterrupt(&timerLock,&rflags);
@@ -95,6 +93,21 @@ int addTimer(Timer *timer)
    /*Add this timer to the last position.*/
    listAddTail(&timer->list,&timers);
 end:
+   unlockSpinLockRestoreInterrupt(&timerLock,&rflags);
+   return 0;
+}
+
+int removeTimer(Timer *timer)
+{
+   u64 rflags;
+   lockSpinLockDisableInterrupt(&timerLock,&rflags);
+
+   listDelete(&timer->list); 
+      /*A list can be deleted more than one times.*/
+      /*So this will never be failed.*/
+   if(!timer->onStack)
+      kfree(timer);
+
    unlockSpinLockRestoreInterrupt(&timerLock,&rflags);
    return 0;
 }
