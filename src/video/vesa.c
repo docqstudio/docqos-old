@@ -136,6 +136,8 @@ int fillRect(
    fill2 = (color >> 8) & 0xff;
    fill3 = (color >> 16) & 0xff;
 
+   u64 rflags = storeInterrupt();
+   closeInterrupt();
    vram = (u8 *)pa2va(currentVBEModeInfo.physBaseAddr);
    vram += 3*x + 3*xRes*y;
    
@@ -148,6 +150,7 @@ int fillRect(
          *(vram + i*3 + j*xRes*3 + 2) = fill3;
       }
    }
+   restoreInterrupt(rflags);
    return 0;
 }
 
@@ -207,8 +210,7 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
    const u32 yRes = currentVBEModeInfo.yResolution;
 
    downSemaphore(&displayLock);
-   disablePreemption(); 
-     /*Can't run if preemption is enabled? Why????*/
+   //disablePreemption();
    int x = displayPosition % xRes;
    int y = displayPosition / xRes;
 
@@ -256,7 +258,7 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
 
    displayPosition = y * xRes + x; /*Update the next display position.*/
 
-   enablePreemption();
+   //enablePreemptionSchedule();
    upSemaphore(&displayLock);
    return 0;
 }

@@ -21,6 +21,21 @@ void *memcpy(void *to,const void *from,int n) /*NOTE: It's easy enough,but it's 
    return to;
 }
 
+int memcmp(const void *str1,const void *str2,int n)
+{
+   register const u8 *s1 = (typeof(s1)) str1;
+   register const u8 *s2 = (typeof(s1)) str2;
+   register unsigned char c1,c2;
+   if(!n)
+      return 0;
+   do{
+      c1 = *s1++;
+      c2 = *s2++;
+   }while(c1 == c2 && --n);
+
+   return c1 - c2;
+}
+
 void *memset(void *mem,u8 c,u64 len)
 {
    if(len >= 8)

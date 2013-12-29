@@ -5,6 +5,10 @@
 #include <interrupt/interrupt.h>
 
 #define TASK_KERNEL_STACK_SIZE (4096*2)
+#define TASK_MAX_FILES         20
+
+typedef struct VFSDentry VFSDentry;
+typedef struct VFSFile VFSFile;
 
 typedef enum TaskState{
    TaskRunning,
@@ -21,11 +25,12 @@ typedef struct Task{
    u64 rsp;
 
    SpinLock lock;
-
    ListHead list;
-   ListHead sleepingList;
 
    u32 preemption;
+   VFSDentry *root;
+   VFSDentry *pwd;
+   VFSFile *fd[TASK_MAX_FILES];
 } Task;
 
 typedef union TaskKernelStack
@@ -57,7 +62,10 @@ int initTask(void) __attribute__ ((noreturn));
 
 inline int enablePreemptionSchedule(void)
 {
-   if(!--getCurrentTask()->preemption)
+   Task *current = getCurrentTask();
+   if(!current)
+      return 0;
+   if(!--current->preemption)
       schedule();
    return 0;
 }

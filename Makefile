@@ -19,8 +19,13 @@ clean:dir_src_clean
 
 clean_all:clean
 	$(RM) bin/*.bin bin/kernel parport.out os.iso map.map bochsout.txt 
+	$(RM) kernel.elf
 
 dir_src_clean:
 	cd src && $(MAKE) -f Makefile clean
 
-all: clean first
+all:clean first
+
+gdb:first
+	$(QEMU) $(QEMUFLAGS_DEBUG) &
+	$(GDB) $(GDBFLAGS)

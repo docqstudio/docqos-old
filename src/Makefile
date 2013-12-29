@@ -8,7 +8,8 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/acpi.o .obj/localapic.o .obj/ioapic.o .obj/buddy.o .obj/slab.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
-   .obj/pci.o .obj/ide.o .obj/semaphore.o
+   .obj/pci.o .obj/ide.o .obj/semaphore.o .obj/vfs.o .obj/block.o \
+   .obj/iso9660.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -111,7 +112,7 @@ cachedir:
             ../include/video/console.h ../include/core/list.h ../include/cpu/spinlock.h \
 	    ../include/memory/buddy.h ../include/cpu/atomic.h ../include/lib/string.h \
 	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h \
-	    ../include/time/time.h
+	    ../include/time/time.h ../include/filesystem/virtual.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/fork.o:task/fork.S
 	$(AS) $(ASFLAGS) -o $@ $<
@@ -125,14 +126,26 @@ cachedir:
 .obj/ide.o:driver/ide.c ../include/core/const.h ../include/video/console.h ../include/driver/driver.h \
             ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
 	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h ../include/interrupt/interrupt.h \
-	    ../include/task/task.h
+	    ../include/task/task.h ../include/filesystem/block.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/semaphore.o: task/semaphore.c ../include/core/const.h ../include/task/semaphore.h \
                   ../include/task/waitqueue.h ../include/task/task.h ../include/core/list.h \
 		  ../include/cpu/spinlock_types.h ../include/interrupt/interrupt.h ../include/cpu/spinlock.h \
                   ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
+.obj/vfs.o:filesystem/virtual.c ../include/core/const.h ../include/filesystem/block.h ../include/core/list.h \
+           ../include/filesystem/virtual.h ../include/core/list.h ../include/memory/kmalloc.h ../include/lib/string.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/block.o:filesystem/block.c ../include/core/const.h ../include/memory/kmalloc.h ../include/filesystem/block.h \
+             ../include/filesystem/virtual.h ../include/core/list.h ../include/task/task.h ../include/cpu/spinlock.h \
+	     ../include/cpu/spinlock_types.h ../include/cpu/atomic.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/iso9660.o:filesystem/iso9660.c ../include/core/const.h ../include/core/list.h ../include/filesystem/block.h \
+             ../include/filesystem/virtual.h ../include/lib/string.h ../include/task/task.h ../include/cpu/spinlock.h \
+	     ../include/cpu/spinlock_types.h ../include/cpu/atomic.h
+	$(CC) $(CFLAGS) -o $@ $<
+
 
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
-	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $@ $(OBJS)
-	$(TOBINARY) $(TARGET) $(TARGET)
+	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $(KERNEL_ELF) $(OBJS)
+	$(TOBINARY) $(KERNEL_ELF) $(TARGET)

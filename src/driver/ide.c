@@ -6,6 +6,7 @@
 #include <cpu/io.h>
 #include <interrupt/interrupt.h>
 #include <task/task.h>
+#include <filesystem/block.h>
 
 typedef enum IDEDeviceType{
    InvalidIDEDevice,
@@ -31,6 +32,7 @@ typedef struct IDEDevice{
    u8 primary,master;
    /*Primary is if this device is primary.*/
    /*Master is if this device is master.*/
+   BlockDevice block;
 } IDEDevice;
 
 typedef struct IDEInterruptWait{
@@ -255,70 +257,120 @@ static int ideWaitInterruptEnd(IDEDevice *device)
    return 0;
 }
 
-static int ideReadATAPI(IDEDevice *device,u64 lba,u64 size,void *buf)
+static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
+                                 u16 cmdSize,u16 transSize,void *buf)
 {
    IDEInterruptWait wait;
    const u8 primary = device->primary;
    const u8 master = device->master;
-   u8 cmd[12] = {0xa8 /*READ (12).*/,0,0,0,0,0,0,0,0,0,0,0};
-      /*SCSI Command.*/
+   const u8 poll = getCurrentTask()->preemption > 0;
+      /*If preemption is disabled,we will poll.*/
 
-   ideWaitReady(primary); /*Wait for this device ready.*/
+   disablePreemption();
+   ideWaitReady(primary);
    ideOutb(primary,IDE_REG_DEV_SEL,master << 4);
-   for(int i = 0;i < 4;++i) /*A little delay.*/
-     ideInb(primary,IDE_REG_CONTROL);
-   ideOutb(primary,IDE_REG_CONTROL,IDE_ENABLE_IRQ); /*Enable IRQs.*/
+   for(int i = 0;i < 4;++i)
+      ideInb(primary,IDE_REG_CONTROL);
+   ideOutb(primary,IDE_REG_CONTROL,poll ? IDE_ENABLE_IRQ : IDE_DISABLE_IRQ);
+      /*Disable IRQs if we need poll.*/
    ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
-   ideOutb(primary,IDE_REG_LBA1,(ATAPI_SECTOR_SIZE & 0xff)); 
-   ideOutb(primary,IDE_REG_LBA2,((ATAPI_SECTOR_SIZE >> 8)) & 0xff);
-   ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET); /*Send command.*/
+   ideOutb(primary,IDE_REG_LBA1,(transSize & 0xff));
+   ideOutb(primary,IDE_REG_LBA2,(transSize >> 8) & 0xff);
+   ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET);/*Send command.*/
 
    if(ideWaitDRQ(primary))
-      return -1; /*Return if error.*/
+      return -1;
+   if(!poll)
+   {
+      ideWaitInterrupt(&wait,device);
+      ideOutsw(primary,IDE_REG_DATA,cmdSize / 2,cmd);
+      schedule(); /*Wait Interrupt.*/
+      ideWaitInterruptEnd(device);
+   }else
+      ideOutsw(primary,IDE_REG_DATA,cmdSize / 2,cmd);
 
-   cmd[9] = 
-      (size % ATAPI_SECTOR_SIZE) 
-      ? (size / ATAPI_SECTOR_SIZE + 1) 
-      : (size / ATAPI_SECTOR_SIZE);
+   if(ideWaitDRQ(primary))
+      return -1;
+   int sizeRead = ideInb(primary,IDE_REG_LBA1);
+   sizeRead |= ideInb(primary,IDE_REG_LBA2) << 8;
+
+   if(!poll)
+   {
+      ideWaitInterrupt(&wait,device);
+      ideInsl(primary,IDE_REG_DATA,sizeRead / 4,buf);
+      schedule();
+      ideWaitInterruptEnd(device);
+   }else
+      ideInsl(primary,IDE_REG_DATA,sizeRead / 4,buf);
+      
+   enablePreemption();
+   return (sizeRead == transSize) ? 0 : -1;
+      /*Failed if sizeRead != transSize.*/
+}
+
+static int ideReadSectorATAPI(IDEDevice *device,u64 lba,u8 sector,void *buf)
+{
+   u8 cmd[12] = {0xa8 /*READ (12).*/,0,0,0,0,0,0,0,0,0,0,0};
+      /*SCSI Command.*/
+   if(sector >= 128)
+      return -1;
+
+   cmd[9] = sector;
    cmd[2] = (lba >> 0x18) & 0xff;
    cmd[3] = (lba >> 0x10) & 0xff;
    cmd[4] = (lba >> 0x08) & 0xff;
    cmd[5] = (lba >> 0x00) & 0xff; /*Set this scsi command.*/
 
-   disablePreemption();
-   ideWaitInterrupt(&wait,device);
-   ideOutsw(primary,IDE_REG_DATA,6,cmd);
-   enablePreemption();
-   schedule();
-             /*Write and wait for an IRQ.*/
-   ideWaitInterruptEnd(device);
+   int ret = ideSendCommandATAPI(device,cmd,sizeof(cmd),sector * ATAPI_SECTOR_SIZE,buf);
 
-   if(ideWaitDRQ(primary))
-      return -1;
-
-   u16 sizeRead = ideInb(primary,IDE_REG_LBA1);
-   sizeRead |= ideInb(primary,IDE_REG_LBA2) << 8;
-
-   disablePreemption();
-   ideWaitInterrupt(&wait,device); 
-   ideInsw(primary,IDE_REG_DATA,sizeRead / 2,buf);
-                   /*Read data.*/
-   enablePreemption();
-   schedule();  /*Wait for another IRQ.*/
-   ideWaitInterruptEnd(device); 
-
-   return 0;
+   return ret;
 }
 
-static int ideRead(IDEDevice *device,u64 lba,u64 size,void *buf)
+static int ideRead(void *data,u64 start,u64 size,void *buf)
 {
+   IDEDevice *device = (IDEDevice *)data;
    if(device->type == IDEDeviceTypeATA)
    {
       /*We will support it in the future.*/
       return -1;
    }else if(device->type == IDEDeviceTypeATAPI)
    {
-      return ideReadATAPI(device,lba,size,buf);
+      if(size % ATAPI_SECTOR_SIZE == 0 && start % ATAPI_SECTOR_SIZE == 0)
+         return ideReadSectorATAPI(device,start / ATAPI_SECTOR_SIZE,size / ATAPI_SECTOR_SIZE,buf);
+      u64 lba = start / ATAPI_SECTOR_SIZE;
+      if(start % ATAPI_SECTOR_SIZE != 0)
+      {
+         if(ideReadSectorATAPI(device,lba,1,ideIOBuffer))
+            return -1;
+         u64 __size;
+         if(size < ATAPI_SECTOR_SIZE - start % ATAPI_SECTOR_SIZE)
+            __size = size;
+         else
+            __size = ATAPI_SECTOR_SIZE - start % ATAPI_SECTOR_SIZE;
+         memcpy((void *)buf,(const void *)ideIOBuffer + start % ATAPI_SECTOR_SIZE,__size);
+         ++lba;
+         size -= __size;
+         if(size == 0)
+            return 0;
+      }
+      int count = size / ATAPI_SECTOR_SIZE;
+      if(size % ATAPI_SECTOR_SIZE != 0)
+         --count;
+      while(count > 0)
+      {
+         if(ideReadSectorATAPI(device,lba,1,buf))
+            return -1;
+         buf += ATAPI_SECTOR_SIZE;
+         ++lba;
+         --count;
+      }
+      if(size % ATAPI_SECTOR_SIZE != 0)
+      {
+         if(ideReadSectorATAPI(device,lba,1,ideIOBuffer))
+            return -1;
+         memcpy(buf,ideIOBuffer,size % ATAPI_SECTOR_SIZE);
+      }
+      return 0;
    }else
    {
       return -1;
@@ -352,127 +404,6 @@ static int ideParseIdentifyData(IDEDevice *device,IDEDeviceType type,void *__dat
       return -1;
    }
    return 0;
-}
-
-static int parseISO9660FileSystemDir(
-   IDEDevice *device,u64 lba,u8 *buf8,int depth)
-{
-   u64 offset = 0;
-   u8 isDir = 0;
-   u8 needRead = 0;
-   if(ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8))
-      return -1;
-   for(;;offset += buf8[offset + 0x0] /*Length of Directory Record.*/)
-   {
-      while(offset >= ATAPI_SECTOR_SIZE)
-      {
-         offset -= ATAPI_SECTOR_SIZE;
-         ++lba;
-         needRead = 1;
-         /*Read again.*/
-      }
-      if(needRead)
-         if(ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8))
-            return -1;
-      needRead = 0;
-      
-      if(buf8[offset + 0x0] == 0x0) /*No more.*/
-         break;
-       
-      /*Location of extent (LBA) in both-endian format.*/
-      u64 fileLBA = *(u32 *)(buf8 + offset + 0x2);
-      if(fileLBA <= lba)
-        continue;
-      int __depth = depth;
-      while(__depth--)
-         printk("--");
-
-      isDir = buf8[offset + 25] & 0x2; /*Is it a dir?*/
-
-      u64 filesize = *(u32 *)(buf8 + offset + 10);
-
-      /*Length of file identifier (file name). 
-       * This terminates with a ';' character 
-       * followed by the file ID number in ASCII coded decimal ('1').*/
-      u64 filenameLength = buf8[offset + 32];
-      if(!isDir)
-         filenameLength -= 2; /*Remove ';' and '1'.*/
-
-      char filename[filenameLength + 1]; /*Add 1 for '\0'.*/
-      memcpy((void *)filename,
-         (const void *)(buf8 + offset + 33),
-         filenameLength);
-
-      if((!isDir) && (filename[0] == '_'))
-         filename[0] = '.';
-      if((!isDir) && (filename[filenameLength - 1] == '.'))
-         filename[filenameLength - 1] = '\0';
-      else
-         filename[filenameLength] = '\0';
-
-      /*To lower.*/
-      for(u64 i = 0;i < filenameLength;++i)
-         if((filename[i] <= 'Z') && (filename[i] >= 'A'))
-            filename[i] -= 'A' - 'a';
-      if(isDir)
-      {
-         printk("LBA:%d.",(int)fileLBA);
-         printk("Dirname:%s\n",filename);
-         parseISO9660FileSystemDir(device,fileLBA,buf8,depth + 1);
-         ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8);
-         /*We must read again.*/
-      }
-      else
-      {
-         if(filesize != 0)
-            printk("LBA:%d.",(int)fileLBA);
-         else
-            printk("Null file,no LBA.");
-            /*LBA may not be right if this file is null!*/
-         printk("Filename:%s\n",filename);
-      }
-   }
-
-
-   return 0;
-}
-
-static int parseISO9660FileSystem(IDEDevice *device)
-{
-   /*See also http://wiki.osdev.org/ISO_9660.*/
-   /*And http://en.wikipedia.org/wiki/ISO_9660.*/
-   u8  *buf8  = (u8  *)ideIOBuffer;
-
-   /*System Area (32,768 B)     Unused by ISO 9660*/
-   /*32786 = 0x8000.*/
-   u64 lba = (0x8000 / 0x800);
-
-   for(;;++lba)
-   {
-      if(ideRead(device,lba,ATAPI_SECTOR_SIZE,buf8))
-         return -1; /*It may not be inserted if error.*/
-      /*Identifier is always "CD001".*/
-      if(buf8[1] != 'C' ||
-         buf8[2] != 'D' ||
-         buf8[3] != '0' ||
-         buf8[4] != '0' ||
-         buf8[5] != '1' )
-         return -1;
-       if(buf8[0] == 0xff) /*Volume Descriptor Set Terminator.*/
-         return -1;
-       if(buf8[0] != 0x01 /*Primary Volume Descriptor.*/)
-         continue;
-       
-       /*Directory entry for the root directory.*/
-       if(buf8[156] != 0x22 /*Msut 34 bits.*/)
-          return -1;
-
-       /*Location of extent (LBA) in both-endian format.*/
-       lba = *(u32 *)(buf8 + 156 + 2);
-       break;
-   }
-   
-   return parseISO9660FileSystemDir(device,lba,buf8,0);
 }
 
 static int ideProbe(Device *device)
@@ -553,8 +484,13 @@ static int ideEnable(Device *device)
             /*Read and parse it.*/
          if(ideDevices[i][j].subType == IDEDeviceSubTypeCDROM)
          {
-            parseISO9660FileSystem(&ideDevices[i][j]);
-                  /*Parse it!*/
+            BlockDevice *block = &ideDevices[i][j].block;
+            block->write = 0;
+            block->read = &ideRead;
+            block->type = BlockDeviceCDROM;
+            block->data = (void *)&ideDevices[i][j];
+            block->end = (u64)-1;
+            registerBlockDevice(block);
             createKernelTask(&cdromTask,&ideDevices[i][j]);
          }
       }
@@ -576,44 +512,10 @@ static int ideDisable(Device *device)
 
 static int cdromStatusCheck(IDEDevice *device)
 {
-   disablePreemption();
-
-   IDEInterruptWait wait;
-   const int primary = device->primary;
-   const int master = device->master;
    u8 cmd[12] = {0x25 /*Read Capacity.*/,0,0,0,0,0,0,0,0,0,0,0};
-
-   ideWaitReady(primary);
-   ideOutb(primary,IDE_REG_DEV_SEL,master << 4);
-   for(int i = 0;i < 4;++i) /*A little delay.*/
-     ideInb(primary,IDE_REG_CONTROL);
-   ideOutb(primary,IDE_REG_CONTROL,IDE_ENABLE_IRQ);
-   ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
-   ideOutb(primary,IDE_REG_LBA1,(0x08 & 0xff)); /*8 Bytes.*/ 
-   ideOutb(primary,IDE_REG_LBA2,((0x08 >> 8)) & 0xff);
-   ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET);
-
-   if(ideWaitDRQ(primary))
-      return -1; /*Return if error.*/
-
-   ideWaitInterrupt(&wait,device);
-   
-   ideOutsw(primary,IDE_REG_DATA,6,cmd);
-             /*Write and wait for an IRQ.*/
-   schedule();
-   ideWaitInterruptEnd(device);
-
-   if(ideWaitDRQ(primary))
-      return 1; /*If error,this media is not inserted.*/
-   
-   ideWaitInterrupt(&wait,device);
-   
-   ideInsl(primary,IDE_REG_DATA,2,ideIOBuffer); /*Read data.*/
-
-   schedule(); /*Wait for another IRQ.*/
-   ideWaitInterruptEnd(device);
-
-   enablePreemption();
+   int ret = ideSendCommandATAPI(device,cmd,sizeof(cmd),8,ideIOBuffer);
+   if(ret < 0)
+      return 1; /*Not inserted.*/
    return 0; /*This media is inserted.*/
 }
 

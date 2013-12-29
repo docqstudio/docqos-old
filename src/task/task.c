@@ -9,6 +9,7 @@
 #include <lib/string.h>
 #include <interrupt/interrupt.h>
 #include <time/time.h>
+#include <filesystem/virtual.h>
 
 #define switchTo(prev,next) \
    asm volatile( \
@@ -33,7 +34,6 @@ extern void *endAddressOfKernel;
 static SpinLock scheduleLock = {};
 
 static ListHead tasks = {};
-static ListHead sleepingTasks = {};
 
 static AtomicType pid = {};
 
@@ -46,14 +46,14 @@ static int scheduleFirst() __attribute__ ((noreturn));
 static Task *allocTask(u64 rip)
 {
    Task *ret = (Task *)getPhysicsPageAddress(allocPages(1));
+   memset(ret,0,sizeof(Task));
    ret->pid = (atomicAddRet(&pid,1) - 1);
    ret->rsp = 
       (u64)(pointer)(((u8 *)ret) + TASK_KERNEL_STACK_SIZE - 1);
    ret->rip = rip;
-   ret->preemption = 0; /*Enable preemption.*/
+   ret->state = TaskSleeping;
    initSpinLock(&ret->lock);
 
-   initList(&ret->sleepingList);
    initList(&ret->list);
    return ret;
 }
@@ -64,7 +64,6 @@ static Task *addTask(Task *ret)
    lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
 
    listAddTail(&ret->list,&tasks);
-   listAddTail(&ret->sleepingList,&sleepingTasks);
 
    unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
 
@@ -81,8 +80,6 @@ static int destoryTask(Task *task)
 {  
    /*When we come to the function,we have locked*/
    /*scheduleLock and task->lock.So we shoudn't lock them again.*/
-   if(task->state == TaskSleeping)
-      listDelete(&task->sleepingList); 
    task->state = TaskExited; 
    listDelete(&task->list);
 
@@ -100,10 +97,6 @@ static int __switchTo(Task *prev,Task *next,u64 rip,u64 rsp) /*It will be run by
          prev->state = TaskSleeping;
          prev->rip = rip;
          prev->rsp = rsp;
-         if(prev != idleTask)
-         {
-            listAddTail(&prev->sleepingList,&sleepingTasks);
-         }
          unlockSpinLock(&prev->lock);
       }else if(prev->state == TaskExited)
       {
@@ -155,6 +148,7 @@ static int idle(void)
    int doInitcalls(void);
 
    closeInterrupt();
+   disablePreemption();
 
    printk("\n");
    printkInColor(0x00,0xff,0x00
@@ -168,11 +162,30 @@ static int idle(void)
    if(doInitcalls())
       goto end;
 
+   char *buf[20] = {};
+   printk("\nTry to open file 'test1.c'.\n");
+   int fd = doOpen("test1.c");
+   if(fd < 0)
+      printkInColor(0xff,0x00,0x00,"Failed!!This file doesn't exist.\n");
+   else
+      doClose(fd); /*Never happen.*/
+   printk("Try to open file 'test.c'.\n");
+   fd = doOpen("test.c");
+   if(fd >= 0)
+   {
+      printkInColor(0x00,0xff,0x00,"Successful!Read data from it:\n");
+      int size = doRead(fd,buf,sizeof(buf) - 1);
+      doClose(fd); /*Close it.*/
+      buf[size] = '\0';
+      printkInColor(0x00,0xff,0xff,"%s\n",buf);
+   }
+
    createKernelTask(taskA,0);
    createKernelTask(taskB,0);
    createKernelTask(taskC,0);
    createKernelTask(taskD,0);
 
+   enablePreemption();
    startInterrupt();
   
    schedule();
@@ -214,20 +227,29 @@ int schedule(void)
 {
    Task *prev = getCurrentTask();
    Task *next = 0;
+   ListHead *start = (prev == idleTask) ? &tasks : &prev->list;
 
    u64 rflags;
    lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
    /*If we schedule successfully,it will be unlocked in finishScheduling.*/
 
-   if(!listEmpty(&sleepingTasks))
+   for(ListHead *list = start->next;list != start;list = list->next)
    {
-      next = listEntry(sleepingTasks.next,Task,sleepingList);
-      listDelete(&next->sleepingList);
-   }else if((prev->state == TaskRunning)){
-      unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
-      return 0;
-   }else
-      next = idleTask;
+      Task *temp = listEntry(list,Task,list);
+      if(temp->state == TaskSleeping)
+      {
+         next = temp;
+         break;
+      }
+   }
+
+   if(!next)
+   {
+      if(prev->state == TaskRunning)
+         next = prev;
+      else
+         next = idleTask;
+   }
 
    if(next == prev)
    {
@@ -274,23 +296,19 @@ int doFork(IRQRegisters *regs)
 
    Task *current = getCurrentTask();
    Task *new = allocTask(0);
-   u32 pid = new->pid;
-   u64 rsp = new->rsp;
 
-   *new = *current; /*Copy.*/
-
+   new->root = current->root;
+   new->pwd = current->pwd;
    new->rip = (u64)retFromFork;
- 
-   new->rsp = rsp;
-   regs->rsp = rsp;
+   regs->rsp = new->rsp;
+   memcpy((void *)new->fd,(const void *)current->fd,sizeof(current->fd));
+
    *(IRQRegisters *)(new->rsp -= sizeof(*regs))
       = *regs; /*They will be popped in retFromFork.*/
 
-   new->pid = pid;
-
    addTask(new);
 
-   return pid;
+   return new->pid;
 }
 
 int doExit(int n)
@@ -349,7 +367,6 @@ int wakeUpTask(Task *task)
       if(task->state != TaskStopping)
          break;
       task->state = TaskSleeping;
-      listAddTail(&task->sleepingList,&sleepingTasks);
    }while(0);
 
    unlockSpinLock(&task->lock);
@@ -360,7 +377,6 @@ int wakeUpTask(Task *task)
 int initTask(void)
 {
    initList(&tasks);
-   initList(&sleepingTasks);
 
    initSpinLock(&scheduleLock);
 

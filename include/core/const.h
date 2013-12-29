@@ -24,5 +24,10 @@ typedef int (*InitcallFunction)(void);
 
 #define subsysInitcall(fn) DEFINE_INITCALL(0,fn)
 #define driverInitcall(fn) DEFINE_INITCALL(1,fn)
+#define fileSystemInitcall(fn) DEFINE_INITCALL(2,fn)
+#define syncInitcall(fn) DEFINE_INITCALL(3,fn)
+
+#define likely(x) __builtin_expect(!!(x),1)
+#define unlikely(x) __builtin_expect(!!(x),0)
 
 #define CONFIG_DEBUG

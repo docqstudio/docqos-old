@@ -1,0 +1,295 @@
+#include <core/const.h>
+#include <filesystem/block.h>
+#include <filesystem/virtual.h>
+#include <memory/kmalloc.h>
+#include <task/task.h>
+#include <lib/string.h>
+
+ListHead fileSystems; 
+/*A list of file systems which has registered.*/
+
+static int initVFS(void)
+{ /*Init this list.*/
+   return initList(&fileSystems);
+}
+
+static VFSDentry *createDentry(void)
+{
+   VFSDentry *dentry = (VFSDentry *)kmalloc(sizeof(VFSDentry));
+   if(unlikely(!dentry)) /*No memory.*/
+      return 0;
+   dentry->inode = (VFSINode *)kmalloc(sizeof(VFSINode));
+   if(unlikely(!dentry->inode))
+   {
+      kfree(dentry);
+      return 0;
+   } /*Init some fields.*/
+   initSpinLock(&dentry->lock);
+   initList(&dentry->list);
+   initList(&dentry->children);
+   atomicSet(&dentry->ref,1); /*Ref count.*/
+   dentry->name = 0;
+   return dentry;
+}
+
+static int destoryDentry(VFSDentry *dentry)
+{
+   if(dentry->name)
+      kfree(dentry->name);
+   kfree(dentry->inode);
+   return kfree(dentry); /*Kfree them.*/
+}
+
+static FileSystemMount *createFileSystemMount(void)
+{
+   FileSystemMount *mnt = 
+      (FileSystemMount *)kmalloc(sizeof(FileSystemMount));
+   if(unlikely(!mnt)) /*No memory.*/
+      return 0;
+   mnt->root = createDentry();
+   if(unlikely(!mnt->root))
+   {
+      kfree(mnt);
+      return 0;
+   }
+   return mnt;
+}
+
+static int destoryFileSystemMount(FileSystemMount *mnt)
+{
+   destoryDentry(mnt->root);
+   return kfree(mnt);
+}
+
+static int vfsLookUpClear(VFSDentry *dentry)
+{
+   VFSDentry *parent;
+   while((parent = dentry->parent))
+   {
+      lockSpinLock(&parent->lock);
+      if(atomicAddRet(&dentry->ref,-1) == 0)
+      { /*If reference count is zero,destory it.*/
+         listDelete(&dentry->list);
+         destoryDentry(dentry);
+      }
+      unlockSpinLock(&parent->lock);
+      dentry = parent;
+   }
+   atomicAdd(&dentry->ref,-1); /*It should never be 0.*/
+   return 0;
+}
+
+static VFSDentry *vfsLookUp(const char *__path)
+{
+   if(*__path == '\0')
+      return 0;
+   VFSDentry *ret,*new;
+   u8 length = strlen(__path);
+   char ___path[length + 1];
+   char *path = ___path; 
+   u8 error = 0; /*Copy path for writing.*/
+   memcpy((void *)path,(const void *)__path,length + 1);
+   if(*path == '/')
+      ret = getCurrentTask()->root;
+   else
+      ret = getCurrentTask()->pwd;
+   {
+      VFSDentry *parent,*child = ret;
+      while((parent = child->parent))
+      {
+         lockSpinLock(&parent->lock);
+         atomicAdd(&child->ref,1);
+         unlockSpinLock(&parent->lock);
+         child = parent;
+      }
+      atomicAdd(&child->ref,1);
+   } /*Add reference count.*/
+   for(;;)
+   {
+      while(*path == '/')
+         ++path;
+      if(*path == '\0')
+         return ret;
+      char *next = path;
+      while(*next != '/' && *next != '\0')
+         ++next;
+      if(*next == '\0')
+         break; /*If last,break.*/
+      *next = '\0'; /*It will be restored soon.*/
+      int pathLength = strlen(path);
+      lockSpinLock(&ret->lock);
+      for(ListHead *list = ret->children.next;list != &ret->children;list = list->next)
+      {
+         VFSDentry *dentry = listEntry(list,VFSDentry,list);
+         if(memcmp(dentry->name,path,pathLength) == 0)
+         { /*Search ret->children.*/
+            atomicAdd(&dentry->ref,1);
+            unlockSpinLock(&ret->lock);
+            ret = dentry;
+            if(ret->type != VFSDentryDir)
+               goto failed; /*We need a dir.*/
+            goto next; /*Found!*/
+         }
+      }
+      unlockSpinLock(&ret->lock);
+      {
+         new = createDentry();
+         if(unlikely(!new))
+            goto failed;
+         error = (*ret->inode->operation->lookUp)(ret,new,path);
+         if(error || new->type != VFSDentryDir) /*Try to look it up in disk.*/
+            goto failedWithNew;
+         new->parent = ret;
+         char *name = (char *)kmalloc(pathLength);
+         if(unlikely(!name)) /*If no memory for name,exit.*/
+            goto failedWithNew;
+         memcpy((void *)name,(const void *)path,pathLength);
+         lockSpinLock(&ret->lock);
+         listAddTail(&new->list,&ret->children);
+         unlockSpinLock(&ret->lock); /*Add to parent's children list.*/
+         ret = new;
+      }
+next:
+      *next = '/'; /*Restore.*/
+      path = next;
+   }
+    /*Last.*/
+   int pathLength = strlen(path);
+   lockSpinLock(&ret->lock);
+   for(ListHead *list = ret->children.next;list != &ret->children;list = list->next)
+   {
+      VFSDentry *dentry = listEntry(list,VFSDentry,list);
+      if(memcmp(dentry->name,path,pathLength) == 0)
+      { 
+         atomicAdd(&ret->ref,1);
+         unlockSpinLock(&ret->lock);
+         ret = dentry;
+         goto found; /*Found!! Just return.*/
+      }
+   }
+   unlockSpinLock(&ret->lock);
+   {
+      new = createDentry();
+      if(unlikely(!new))
+         goto failed;
+      error = (*ret->inode->operation->lookUp)(ret,new,path);
+      if(error)
+         goto failedWithNew;
+      new->parent = ret;
+      char *name = (char *)kmalloc(pathLength);
+      if(unlikely(!name))
+         goto failedWithNew;
+      memcpy((void *)name,(const void *)path,pathLength);
+      lockSpinLock(&ret->lock);
+      listAddTail(&new->list,&ret->children);
+      unlockSpinLock(&ret->lock);
+      ret = new;
+   }
+found:
+   return ret;
+failedWithNew:
+   destoryDentry(new);
+failed: /*Failed.*/
+   vfsLookUpClear(ret);
+   return 0;
+}
+
+int registerFileSystem(FileSystem *system)
+{
+   return listAddTail(&system->list,&fileSystems);
+} /*In fact,maybe there need a spinlock,but now we just ingore it.*/
+
+int doOpen(const char *path)
+{
+   Task *current = getCurrentTask();
+   int fd;
+   for(fd = 0;fd < sizeof(current->fd) / sizeof(current->fd[0]);++fd)
+      if(current->fd[fd] == 0)
+         break; /*Found a null position in current->fd.*/
+   VFSDentry *dentry = vfsLookUp(path);
+   if(!dentry)
+      return -1;
+   if(dentry->type != VFSDentryFile)
+   {
+      vfsLookUpClear(dentry);
+      return -1; /*Return -1 if failed.*/
+   }
+   VFSFile *file = kmalloc(sizeof(VFSFile));
+   if(unlikely(!file))
+   {
+      vfsLookUpClear(dentry);
+      return -1;
+   }
+   file->dentry = dentry;
+   (*dentry->inode->operation->open)(dentry,file);
+   current->fd[fd] = file; /*Done!*/
+   return fd;
+}
+
+int doRead(int fd,void *buf,u64 size)
+{
+   if((unsigned int)fd > TASK_MAX_FILES)
+      return -1;
+   Task *current = getCurrentTask();
+   VFSFile *file = current->fd[fd];
+   if(!file)
+      return -1;
+   int ret = (*file->operation->read)(file,buf,size);
+   return ret; /*Call file->operation->read.*/
+}
+
+int doClose(int fd)
+{
+   if((unsigned int)fd > TASK_MAX_FILES)
+      return -1;
+   Task *current = getCurrentTask();
+   VFSFile *file = current->fd[fd];
+   if(!file) /*If there are no files,return -1.*/
+      return -1;
+   VFSDentry *dentry = file->dentry;
+   vfsLookUpClear(dentry); /*Clear it.*/
+   kfree(file);
+   current->fd[fd] = 0;
+   return 0;
+}
+
+int doChroot(FileSystemMount *mnt)
+{ /*It's too bad ,but now we just do this.*/
+   Task *current = getCurrentTask();
+   current->root = mnt->root;
+   if(!current->pwd)
+      current->pwd = mnt->root;
+   return 0;
+}
+
+int doMount(const char *point,BlockDevicePart *part)
+{
+   if(point[0] != '/' || point[1] != '\0')
+      return -1; /*No support.*/
+   FileSystemMount *mnt = createFileSystemMount();
+   if(!mnt)
+      return -1;
+   FileSystem *fs = part->fileSystem;
+   if(fs)
+      if((*fs->mount)(part,mnt) == 0)
+         goto found;
+
+   for(ListHead *list = fileSystems.next;list != &fileSystems;list = list->next)
+   {
+      fs = listEntry(list,FileSystem,list);
+      if((*fs->mount)(part,mnt) == 0)
+         goto found;
+   }
+   destoryFileSystemMount(mnt);
+   return -1;
+found:
+   part->fileSystem = fs;
+   if(mnt->root->type != VFSDentryDir)
+      return (destoryFileSystemMount(mnt),-1);
+   mnt->parent = 0;
+   mnt->root->parent = 0; /*No parents.*/
+   doChroot(mnt); /*Call chroot.*/
+   return 0;
+}
+
+subsysInitcall(initVFS);

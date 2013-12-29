@@ -20,7 +20,7 @@ static IRQInformation irqHandlerTable[IRQ_COUNT] = {};
 int doIRQ(IRQRegisters *reg)
 {
    localApicSendEOI(); /*Send EOI to local APIC.*/
-   int ret;
+   int ret = 0;
    IRQInformation *info;
    switch(reg->irq)
    {
@@ -36,11 +36,13 @@ int doIRQ(IRQRegisters *reg)
       setupLocalApicTimer(0,0); /*Enable.*/
       break;
    default:
+      if(reg->irq >= IRQ_COUNT)
+         return 0;
       ioApicDisableIRQ((u8)reg->irq);
 
       info = &irqHandlerTable[reg->irq];
       if(info->handler == 0)
-         return 0; /*We needn't to enable this IRQ,it should be disabled.*/
+         return 0; /*We needn't to enable thias IRQ,it should be disabled.*/
       startInterrupt();
 
       ret = (*info->handler)(reg,info->data);

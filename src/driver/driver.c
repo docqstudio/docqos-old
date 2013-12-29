@@ -22,11 +22,10 @@ int registerDevice(Device *device)
       Driver *driver = listEntry(list,Driver,list);
       if(driver->probe(device) == 0) 
       {
-         if(driver->enable(device))
-            continue; /*Continue if error.*/
          device->driver = driver;
          unlockSpinLock(&driverLock);
-         return 0;
+         int ret = driver->enable(device);
+         return ret;
       }
    }
    unlockSpinLock(&driverLock);
@@ -53,12 +52,20 @@ int registerDriver(Driver *driver)
    lockSpinLock(&driverLock);
    listAddTail(&driver->list,&drivers);
 
+retry:
    for(ListHead *list = devices.next;list != &devices;list = list->next)
    {
       Device *device = listEntry(list,Device,list);
-      if((!device->driver) && (driver->probe(device) == 0)) 
+      if((!device->driver) && (driver->probe(device) == 0))
+      {
+         device->driver = driver;
+         unlockSpinLock(&driverLock);
          driver->enable(device); /*Enable it.*/
+         lockSpinLock(&driverLock);
+         goto retry;
+      }
    }
+
    unlockSpinLock(&driverLock);
    return 0;
 }

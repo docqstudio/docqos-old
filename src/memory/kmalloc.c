@@ -38,13 +38,11 @@ int initKMalloc(void)
    for(int i = 0;i < sizeof(mallocSizes)/sizeof(MallocSize);++i)
    {
       mallocSizes[i].cache = createCache(mallocSizes[i].size,0x0);
-#ifdef CONFIG_DEBUG
-      if(!mallocSizes[i].cache)
+      if(unlikely(!mallocSizes[i].cache))
       {
          printkInColor(0xff,0x00,0x00,"(%s) Can't get memorySize[%d].cache!",__func__,i);
          return -1;
       }
-#endif
    }
    return 0;
 }
