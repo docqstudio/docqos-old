@@ -1,7 +1,9 @@
 #include <core/const.h>
 #include <filesystem/block.h>
 #include <filesystem/virtual.h>
+#include <filesystem/devfs.h>
 #include <memory/kmalloc.h>
+#include <lib/string.h>
 
 ListHead parts;
 ListHead blockDevices;
@@ -16,13 +18,13 @@ static int syncBlockDevice(void)
    for(ListHead *list = parts.next;list != &parts;list = list->next)
    {
       BlockDevicePart *part = listEntry(list,BlockDevicePart,list);
-      if(doMount("/",part) == 0)
+      if(doMount("/",0,part) == 0)
          return 0; /*Try to mount.*/
    }
    return -1;
 }
 
-int registerBlockDevice(BlockDevice *device)
+int registerBlockDevice(BlockDevice *device,const char *devfs)
 {
    switch(device->type)
    {
@@ -48,6 +50,19 @@ int registerBlockDevice(BlockDevice *device)
       return -1;
    }
    listAddTail(&device->list,&blockDevices);
+   if(devfs)
+   {
+      BlockDevicePart *part = device->parts;
+      int len = strlen(devfs);
+      char name[len + 2];
+      memcpy(name,devfs,len);
+      name[len + 0] = '0';
+      name[len + 1] = '\0';
+      do{ /*Register the parts of this block device to devfs.*/
+         devfsRegisterBlockDevice(part,name);
+         ++name[len + 0]; /*Like these: sda0,sda1,sda2.....*/
+      }while((part = part->next));
+   }
    return 0;
 }
 
@@ -58,7 +73,7 @@ int submitBlockIO(BlockIO *io)
    u64 size = io->size;
    u64 pos = io->start + part->start;
    if(pos + size < pos || pos + size > device->end)
-      return -1;
+      return -1;  
    if(pos < io->start || pos < part->start)
       return -1;
    int ret = (*device->read)(device->data,pos,size,io->buffer);

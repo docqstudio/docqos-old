@@ -29,6 +29,7 @@ static VFSDentry *createDentry(void)
    initList(&dentry->children);
    atomicSet(&dentry->ref,1); /*Ref count.*/
    dentry->name = 0;
+   dentry->mnt = 0;
    return dentry;
 }
 
@@ -126,9 +127,21 @@ static VFSDentry *vfsLookUp(const char *__path)
             atomicAdd(&dentry->ref,1);
             unlockSpinLock(&ret->lock);
             ret = dentry;
-            if(ret->type != VFSDentryDir)
-               goto failed; /*We need a dir.*/
-            goto next; /*Found!*/
+            lockSpinLock(&ret->lock);
+            const VFSDentryType type = ret->type;
+            if(type == VFSDentryDir)
+               goto nextUnlock;
+            if(type == VFSDentryMount)
+            {
+               FileSystemMount *mnt = dentry->mnt;
+               dentry = mnt->root;
+               atomicAdd(&dentry->ref,1);
+               unlockSpinLock(&ret->lock);
+               ret = dentry;
+               goto next;
+            }
+            unlockSpinLock(&ret->lock);
+            goto failed;
          }
       }
       unlockSpinLock(&ret->lock);
@@ -140,15 +153,18 @@ static VFSDentry *vfsLookUp(const char *__path)
          if(error || new->type != VFSDentryDir) /*Try to look it up in disk.*/
             goto failedWithNew;
          new->parent = ret;
-         char *name = (char *)kmalloc(pathLength);
+         char *name = (char *)kmalloc(pathLength + 1);
          if(unlikely(!name)) /*If no memory for name,exit.*/
             goto failedWithNew;
-         memcpy((void *)name,(const void *)path,pathLength);
+         memcpy((void *)name,(const void *)path,pathLength + 1);
+         new->name = name;
          lockSpinLock(&ret->lock);
          listAddTail(&new->list,&ret->children);
          unlockSpinLock(&ret->lock); /*Add to parent's children list.*/
          ret = new;
       }
+nextUnlock:
+      unlockSpinLock(&ret->lock);
 next:
       *next = '/'; /*Restore.*/
       path = next;
@@ -180,6 +196,7 @@ next:
       if(unlikely(!name))
          goto failedWithNew;
       memcpy((void *)name,(const void *)path,pathLength);
+      new->name = name;
       lockSpinLock(&ret->lock);
       listAddTail(&new->list,&ret->children);
       unlockSpinLock(&ret->lock);
@@ -198,6 +215,38 @@ int registerFileSystem(FileSystem *system)
 {
    return listAddTail(&system->list,&fileSystems);
 } /*In fact,maybe there need a spinlock,but now we just ingore it.*/
+
+FileSystem *lookForFileSystem(const char *name)
+{
+   int len = strlen(name) + 1;
+   for(ListHead *list = fileSystems.next;list != &fileSystems;list = list->next)
+   {
+      FileSystem *sys = listEntry(list,FileSystem,list);
+      if(memcmp(sys->name,name,len) == 0)
+         return sys;
+   }
+   return 0;
+}
+
+BlockDevicePart *openBlockDeviceFile(const char *path)
+{
+   VFSDentry *dentry = vfsLookUp(path);
+   if(!dentry)
+      return 0;
+   if(dentry->type != VFSDentryBlockDevice)
+      goto failed; 
+      /*Don't need lock dentry->lock.*/
+      /*Block device file's type will never change.*/
+      /*Instead,a VFSDentryDir dentry can change to a VFSDentryMount dentry.*/
+      /*A VFSDentryMount dentry can also change to a VFSDentryDir dentry.*/
+      /*So if we check 'if(dentry->type == VFSDentryMount)',we need to lock dentry->lock.*/
+   BlockDevicePart *part = dentry->inode->part;
+   vfsLookUpClear(dentry);
+   return part;
+failed:
+   vfsLookUpClear(dentry);
+   return 0;
+}
 
 int doOpen(const char *path)
 {
@@ -248,6 +297,7 @@ int doClose(int fd)
       return -1;
    VFSDentry *dentry = file->dentry;
    vfsLookUpClear(dentry); /*Clear it.*/
+   
    kfree(file);
    current->fd[fd] = 0;
    return 0;
@@ -262,33 +312,81 @@ int doChroot(FileSystemMount *mnt)
    return 0;
 }
 
-int doMount(const char *point,BlockDevicePart *part)
+int doUMount(const char *point)
 {
-   if(point[0] != '/' || point[1] != '\0')
-      return -1; /*No support.*/
+   if(point[0] == '/' && point[1] == '\0')
+      return -1; /*Can not umount / .*/
+   int ret;
+   VFSDentry *dentry = vfsLookUp(point);
+   FileSystemMount *mnt; /*Look for this dentry*/
+   ret = -1;
+   if(dentry->type != VFSDentryMount)
+      goto out; 
+   lockSpinLock(&dentry->lock);
+   if(atomicRead(&dentry->mnt->root->ref) > 1)
+      goto unlockOut; /*If this is used,failed.*/
+   dentry->type = VFSDentryDir; /*Restore to dir type.*/
+   mnt = dentry->mnt; /*Get mnt and set to 0.*/
+   dentry->mnt = 0;
+   unlockSpinLock(&dentry->lock);
+   destoryFileSystemMount(mnt); /*Destory it.*/
+   return 0;
+unlockOut:
+   unlockSpinLock(&dentry->lock);
+out:
+   vfsLookUpClear(dentry);
+   return ret;
+}
+
+int doMount(const char *point,FileSystem *fs,BlockDevicePart *part)
+{
    FileSystemMount *mnt = createFileSystemMount();
    if(!mnt)
       return -1;
-   FileSystem *fs = part->fileSystem;
-   if(fs)
-      if((*fs->mount)(part,mnt) == 0)
-         goto found;
+   if(fs && (*fs->mount)(part,mnt) == 0)
+      goto found;
+   if(!part)
+      goto failed;
+   fs = part->fileSystem;
+   if(fs && (*fs->mount)(part,mnt) == 0)
+      goto found;
 
    for(ListHead *list = fileSystems.next;list != &fileSystems;list = list->next)
    {
-      fs = listEntry(list,FileSystem,list);
+      fs = listEntry(list,FileSystem,list); 
+         /*Look for the file system.*/
       if((*fs->mount)(part,mnt) == 0)
          goto found;
    }
+failed:
    destoryFileSystemMount(mnt);
    return -1;
 found:
-   part->fileSystem = fs;
+   if(part)
+      part->fileSystem = fs;
    if(mnt->root->type != VFSDentryDir)
       return (destoryFileSystemMount(mnt),-1);
-   mnt->parent = 0;
-   mnt->root->parent = 0; /*No parents.*/
-   doChroot(mnt); /*Call chroot.*/
+   if(point[0] == '/' && point[1] == '\0')
+   {
+      mnt->parent = 0;
+      mnt->root->parent = 0; /*No parents.*/
+      doChroot(mnt); /*Call chroot.*/
+      return 0;
+   }
+   VFSDentry *dentry = vfsLookUp(point);
+   if(!dentry) /*Find the dentry of the mount point.*/
+      goto failed;
+   if(dentry->type != VFSDentryDir)
+   {
+      vfsLookUpClear(dentry);
+      goto failed;
+   }
+   mnt->parent = 0; /*Unused,just do this.*/
+   mnt->root->parent = dentry; 
+   lockSpinLock(&dentry->lock);
+   dentry->mnt = mnt;
+   dentry->type = VFSDentryMount; /*Change type.*/
+   unlockSpinLock(&dentry->lock);
    return 0;
 }
 

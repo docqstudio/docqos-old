@@ -169,8 +169,9 @@ static int idle(void)
       printkInColor(0xff,0x00,0x00,"Failed!!This file doesn't exist.\n");
    else
       doClose(fd); /*Never happen.*/
-   printk("Try to open file 'test.c'.\n");
-   fd = doOpen("test.c");
+
+   printk("Try to open file '/dev/dev.inf'.\n");
+   fd = doOpen("/dev/dev.inf");
    if(fd >= 0)
    {
       printkInColor(0x00,0xff,0x00,"Successful!Read data from it:\n");
@@ -179,6 +180,13 @@ static int idle(void)
       buf[size] = '\0';
       printkInColor(0x00,0xff,0xff,"%s\n",buf);
    }
+   printk("Run 'mount -t devfs devfs /dev'.\n");
+   doMount("/dev",lookForFileSystem("devfs"),0);
+   printk("Next,check if '/dev/cdrom0' exists:");
+   if(openBlockDeviceFile("/dev/cdrom0"))
+      printkInColor(0x00,0xff,0x00,"Yes!\n\n");
+   else
+      printkInColor(0xff,0x00,0x00,"No!\n\n");
 
    createKernelTask(taskA,0);
    createKernelTask(taskB,0);

@@ -212,7 +212,7 @@ static int ideWaitReady(u8 device)
       status = ideInb(device,IDE_REG_STATUS);
       if(!(status & IDE_STATUS_BUSY))
          break;
-      schedule();
+      preemptionSchedule();
    }
 
    return 0;
@@ -231,7 +231,7 @@ static int ideWaitDRQ(u8 device)
       }
       if((!(status & IDE_STATUS_BUSY)) && (status & IDE_STATUS_DRQ))
          break;
-      schedule(); /*Give time to other tasks.*/
+      preemptionSchedule(); /*Give time to other tasks.*/
    }
    return error;
 }
@@ -490,8 +490,9 @@ static int ideEnable(Device *device)
             block->type = BlockDeviceCDROM;
             block->data = (void *)&ideDevices[i][j];
             block->end = (u64)-1;
-            registerBlockDevice(block);
-            createKernelTask(&cdromTask,&ideDevices[i][j]);
+            registerBlockDevice(block,"cdrom");
+//            createKernelTask(&cdromTask,&ideDevices[i][j]);
+            (void)cdromTask;
          }
       }
    }

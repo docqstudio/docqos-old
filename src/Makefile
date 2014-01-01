@@ -9,7 +9,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
    .obj/pci.o .obj/ide.o .obj/semaphore.o .obj/vfs.o .obj/block.o \
-   .obj/iso9660.o
+   .obj/iso9660.o .obj/devfs.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -138,13 +138,18 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/block.o:filesystem/block.c ../include/core/const.h ../include/memory/kmalloc.h ../include/filesystem/block.h \
              ../include/filesystem/virtual.h ../include/core/list.h ../include/task/task.h ../include/cpu/spinlock.h \
-	     ../include/cpu/spinlock_types.h ../include/cpu/atomic.h
+	     ../include/cpu/spinlock_types.h ../include/cpu/atomic.h ../include/lib/string.h \
+	     ../include/filesystem/devfs.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/iso9660.o:filesystem/iso9660.c ../include/core/const.h ../include/core/list.h ../include/filesystem/block.h \
              ../include/filesystem/virtual.h ../include/lib/string.h ../include/task/task.h ../include/cpu/spinlock.h \
 	     ../include/cpu/spinlock_types.h ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
-
+.obj/devfs.o:filesystem/devfs.c ../include/core/const.h ../include/core/list.h ../include/filesystem/virtual.h \
+             ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
+	     ../include/interrupt/interrupt.h ../include/cpu/atomic.h ../include/filesystem/block.h \
+	     ../include/memory/kmalloc.h ../include/lib/string.h
+	$(CC) $(CFLAGS) -o $@ $<
 
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
 	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $(KERNEL_ELF) $(OBJS)

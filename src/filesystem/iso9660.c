@@ -9,7 +9,8 @@ static int iso9660Open(VFSDentry *dentry,VFSFile *file);
 static int iso9660Read(VFSFile *file,void *buf,u64 size);
 
 static FileSystem iso9660FileSystem = {
-   .mount = &iso9660Mount
+   .mount = &iso9660Mount,
+   .name = "iso9660"
 };
 
 static VFSINodeOperation iso9660INodeOperation = {
@@ -111,6 +112,8 @@ next:
       u8 nameLength = buffer[pos + 32];
       if(!isDir)
          nameLength -= 2; /*Remove ';1'.*/
+      else
+         nameLength += length - realLength;
       if(length != nameLength)
          continue;
       /*Length of file identifier (file name). 

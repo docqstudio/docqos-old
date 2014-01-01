@@ -8,11 +8,13 @@ typedef struct BlockDevicePart BlockDevicePart;
 typedef struct VFSINode VFSINode;
 typedef struct VFSFile VFSFile;
 typedef struct VFSDentry VFSDentry;
+typedef struct FileSystemMount FileSystemMount;
 
 typedef enum VFSDentryType{
    VFSDentryFile,
    VFSDentryDir,
-   VFSDentryMount
+   VFSDentryMount,
+   VFSDentryBlockDevice
 } VFSDentryType;
 
 typedef struct VFSFileOperation
@@ -44,6 +46,9 @@ typedef struct VFSDentry{
    VFSDentry *parent;
    const char *name;
 
+   FileSystemMount *mnt; 
+      /*Only for type VFSDentryMount.*/
+
    ListHead children;
    ListHead list;
 } VFSDentry;
@@ -54,6 +59,7 @@ typedef struct VFSINode{
    u64 inodeStart;
    BlockDevicePart *part;
 
+   void *data;
    VFSINodeOperation *operation;
 } VFSINode;
 
@@ -65,11 +71,14 @@ typedef struct FileSystemMount{
 typedef struct FileSystem{
    int (*mount)(BlockDevicePart *part,FileSystemMount *mnt);
    ListHead list;
+   const char *name;
 } FileSystem;
 
 int registerFileSystem(FileSystem *system);
+FileSystem *lookForFileSystem(const char *name);
+BlockDevicePart *openBlockDeviceFile(const char *path);
 
-int doMount(const char *point,BlockDevicePart *part);
+int doMount(const char *point,FileSystem *fs,BlockDevicePart *part);
 int doOpen(const char *path);
 int doClose(int fd);
 int doRead(int fd,void *buf,u64 size);

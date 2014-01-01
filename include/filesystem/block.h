@@ -44,4 +44,4 @@ typedef struct BlockIO{
 } BlockIO;
 
 int submitBlockIO(BlockIO *io);
-int registerBlockDevice(BlockDevice *device);
+int registerBlockDevice(BlockDevice *device,const char *devfs);
