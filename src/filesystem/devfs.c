@@ -9,6 +9,7 @@ typedef struct DevfsINode{
    SpinLock lock;
    char name[15];
    BlockDevicePart *part;
+   VFSFileOperation *operation;
    ListHead children;
    ListHead list;
 } DevfsINode;
@@ -46,6 +47,7 @@ static int devfsLookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
          result->type = VFSDentryBlockDevice; /*Block device file.*/
          result->inode->part = next->part; 
          result->inode->operation = dentry->inode->operation;
+         result->inode->data = next;
          return 0;
       }
    }
@@ -63,7 +65,13 @@ static int devfsMount(BlockDevicePart *part __attribute__ ((unused))
 
 static int devfsOpen(VFSDentry *dentry,VFSFile *file)
 {
-   return -1; /*Now we don't support block device file's open.*/
+   DevfsINode *inode = (DevfsINode *)dentry->inode->data;
+   if(!inode->operation)
+      return -1;
+   file->operation = inode->operation;
+   file->dentry = dentry;
+   file->seek = 0;
+   return 0;
 }
 
 static int devfsInit(void)
@@ -96,11 +104,39 @@ int devfsRegisterBlockDevice(BlockDevicePart *part,const char *name)
    for(int i = 0;i < len;++i)
       if(name[i] == '/')
          return -1; /*If name has '/',return.*/
-   DevfsINode *inode = kmalloc(sizeof(inode));
+   DevfsINode *inode = kmalloc(sizeof(*inode));
    if(unlikely(!inode)) /*No memory,return.*/
       return -1;
    memcpy(inode->name,name,len + 1);
    inode->part = part;
+   inode->operation = 0;
+   lockSpinLock(&devfsRoot.lock);
+   listAdd(&inode->list,&devfsRoot.children);
+   unlockSpinLock(&devfsRoot.lock); 
+      /*Add this block device file to devfs' root dir.*/
+   return 0;
+}
+
+int devfsRegisterDevice(VFSFileOperation *operation,const char *name)
+{
+   while(*name != '\0' && *name == '/')
+      ++name; /*Skip '/'.*/
+   if(*name == '\0')
+      return -1; /*If name only has '/',return.*/
+   if(unlikely(!operation))
+      return -1; /*If operation is 0,return.*/
+   int len = strlen(name); /*Get length of name.*/
+   if(len > 14)
+      return -1;
+   for(int i = 0;i < len;++i)
+      if(name[i] == '/')
+         return -1; /*If name has '/',return.*/
+   DevfsINode *inode = kmalloc(sizeof(*inode));
+   if(unlikely(!inode)) /*No memory,return.*/
+      return -1;
+   memcpy(inode->name,name,len + 1);
+   inode->part = 0;
+   inode->operation = operation;
    lockSpinLock(&devfsRoot.lock);
    listAdd(&inode->list,&devfsRoot.children);
    unlockSpinLock(&devfsRoot.lock); 

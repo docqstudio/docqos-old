@@ -20,7 +20,8 @@ typedef enum VFSDentryType{
 typedef struct VFSFileOperation
 {
    int (*read)(VFSFile *file,void *buf,u64 size);
-   int (*write)(VFSFile *file,void *buf,u64 size);
+   int (*write)(VFSFile *file,const void *buf,u64 size);
+   int (*lseek)(VFSFile *file,u64 offset);
 } VFSFileOperation;
 
 typedef struct VFSINodeOperation
@@ -82,3 +83,11 @@ int doMount(const char *point,FileSystem *fs,BlockDevicePart *part);
 int doOpen(const char *path);
 int doClose(int fd);
 int doRead(int fd,void *buf,u64 size);
+int writeFile(VFSFile *file,const void *buf,u64 size);
+int doLSeek(int fd,u64 offset);
+
+VFSFile *openFile(const char *path);
+int readFile(VFSFile *file,void *buf,u64 size);
+int doWrite(int fd,const void *buf,u64 size);
+int closeFile(VFSFile *file);
+int lseekFile(VFSFile *file,u64 offset);

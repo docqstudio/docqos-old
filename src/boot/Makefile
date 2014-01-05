@@ -1,7 +1,7 @@
 ROOT=../..
 BIN=$(ROOT)/bin
 include ../../Makefile.config
-ASFLAGS+=-I ./include
+ASFLAGS=-I ./include
 
 OBJS=.obj/boot.o .obj/loader.o
 TARGETS=$(BIN)/boot.bin $(BIN)/loader.bin

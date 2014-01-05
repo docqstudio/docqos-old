@@ -9,7 +9,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
    .obj/pci.o .obj/ide.o .obj/semaphore.o .obj/vfs.o .obj/block.o \
-   .obj/iso9660.o .obj/devfs.o
+   .obj/iso9660.o .obj/devfs.o .obj/elf64.o .obj/systemcall.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -34,14 +34,15 @@ cachedir:
 	      ../include/interrupt/interrupt.h ../include/acpi/acpi.h ../include/memory/paging.h \
 	      ../include/time/time.h ../include/time/localtime.h ../include/cpu/gdt.h \
 	      ../include/task/task.h ../include/core/list.h ../include/cpu/spinlock.h \
-              ../include/cpu/spinlock_types.h ../include/driver/driver.h ../include/driver/pci.h
+              ../include/cpu/spinlock_types.h ../include/driver/driver.h ../include/driver/pci.h \
+	      ../include/filesystem/virtual.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h  \
             ../include/memory/paging.h ../include/cpu/spinlock.h ../include/cpu/io.h ../include/task/task.h \
             ../include/cpu/spinlock_types.h ../include/task/semaphore.h ../include/task/waitqueue.h \
-	    ../include/cpu/atomic.h
+	    ../include/cpu/atomic.h ../include/filesystem/virtual.h ../include/filesystem/devfs.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/font.o:video/font.c ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -88,7 +89,8 @@ cachedir:
 .obj/kmalloc.o:memory/kmalloc.c ../include/core/const.h ../include/core/list.h ../include/memory/buddy.h \
                ../include/memory/slab.h
 	$(CC) $(CFLAGS) -o $@ $<
-.obj/paging.o:memory/paging.c ../include/core/const.h ../include/memory/paging.h ../include/memory/memory.h
+.obj/paging.o:memory/paging.c ../include/core/const.h ../include/memory/paging.h ../include/memory/memory.h \
+              ../include/memory/buddy.h ../include/lib/string.h ../include/filesystem/virtual.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/hpet.o:time/hpet.c ../include/core/const.h ../include/memory/paging.h ../include/time/hpet.h \
             ../include/video/console.h ../include/acpi/acpi.h ../include/lib/string.h ../include/driver/driver.h \
@@ -112,7 +114,8 @@ cachedir:
             ../include/video/console.h ../include/core/list.h ../include/cpu/spinlock.h \
 	    ../include/memory/buddy.h ../include/cpu/atomic.h ../include/lib/string.h \
 	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h \
-	    ../include/time/time.h ../include/filesystem/virtual.h
+	    ../include/time/time.h ../include/filesystem/virtual.h ../include/task/elf64.h \
+	    ../include/memory/paging.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/fork.o:task/fork.S
 	$(AS) $(ASFLAGS) -o $@ $<
@@ -126,7 +129,8 @@ cachedir:
 .obj/ide.o:driver/ide.c ../include/core/const.h ../include/video/console.h ../include/driver/driver.h \
             ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
 	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h ../include/interrupt/interrupt.h \
-	    ../include/task/task.h ../include/filesystem/block.h
+	    ../include/task/task.h ../include/filesystem/block.h ../include/task/semaphore.h \
+	    ../include/task/waitqueue.h ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/semaphore.o: task/semaphore.c ../include/core/const.h ../include/task/semaphore.h \
                   ../include/task/waitqueue.h ../include/task/task.h ../include/core/list.h \
@@ -149,6 +153,12 @@ cachedir:
              ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
 	     ../include/interrupt/interrupt.h ../include/cpu/atomic.h ../include/filesystem/block.h \
 	     ../include/memory/kmalloc.h ../include/lib/string.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/elf64.o:task/elf64.c ../include/core/const.h ../include/task/elf64.h ../include/filesystem/virtual.h \
+             ../include/memory/paging.h ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/io.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/systemcall.o:task/systemcall.c ../include/core/const.h ../include/task/task.h ../include/interrupt/interrupt.h \
+                  ../include/filesystem/virtual.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds

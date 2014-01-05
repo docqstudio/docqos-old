@@ -1,7 +1,9 @@
 .global defaultInterruptHandler
 .global irqHandlers
 .global handleLocalApicTimer
+.global handleSystemCall
 
+.extern doSystemCall
 .extern doIRQ
 .extern printk
 
@@ -102,6 +104,18 @@ handleLocalApicTimer:
 
    movq %rsp,%rdi
    callq doIRQ
+
+   RESTORE_ALL
+   addq $8,%rsp
+
+   iretq
+
+handleSystemCall:
+   pushq $0xff
+   SAVE_ALL
+
+   movq %rsp,%rdi
+   callq doSystemCall
 
    RESTORE_ALL
    addq $8,%rsp

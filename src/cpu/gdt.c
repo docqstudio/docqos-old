@@ -68,9 +68,9 @@ typedef struct TaskStateSegment{
 
 #define DA_TSS      0x0009
 
-#define DA_DPL3     0x0080
-#define DA_DPL2     0x0060
-#define DA_DPL1     0x0040
+#define DA_DPL3     0x0060
+#define DA_DPL2     0x0040
+#define DA_DPL1     0x0020
 #define DA_DPL0     0x0000
 
 static u8 gdt[GDT_SIZE] = {};
@@ -114,13 +114,22 @@ int initGDT(void)
 {
    int index = sizeof(GDTDescriptor);
    index = setCodeDataDescriptor(index,
-      DA_CODE | DA_CODE_64 | DA_PRESENT);
+      DA_CODE | DA_CODE_64 | DA_PRESENT | DA_DPL0);
+      /*SELECTOR_KERNEL_CODE.*/
+   index = setCodeDataDescriptor(index,
+      DA_CODE | DA_CODE_64 | DA_PRESENT | DA_DPL3);
+      /*SELECTOR_USER_CODE.*/
+   index = setCodeDataDescriptor(index,
+      DA_DATA | DA_DATA_W  | DA_PRESENT | DA_DPL0);
+      /*SELECTOR_KERNEL_DATA.*/
    index = setCodeDataDescriptor(index,
       DA_DATA | DA_DATA_W  | DA_PRESENT | DA_DPL3);
+      /*SELECTOR_USER_DATA.*/
 
    index = setSystemDescriptor(index,
       DA_TSS | DA_PRESENT,
       (pointer)&taskStateSegment,sizeof(TaskStateSegment));
+      /*SELECTOR_TSS.*/
 
    *(u16 *)gdtr = (GDT_SIZE - 1);
    *(u64 *)(gdtr + 2) = (u64)(pointer)gdt;
@@ -147,7 +156,7 @@ int initGDT(void)
       "iretq\n\t"
       "1:"
       :
-      : "a" ((u64)SELECTOR_DATA),"b" ((u64)SELECTOR_KERNEL_CODE)
+      : "a" ((u64)SELECTOR_KERNEL_DATA),"b" ((u64)SELECTOR_KERNEL_CODE)
       : "%rdx","%rcx"
    ); /*Refresh segment registers.*/
 

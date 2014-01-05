@@ -6,6 +6,7 @@
 #include <cpu/io.h>
 #include <interrupt/interrupt.h>
 #include <task/task.h>
+#include <task/semaphore.h>
 #include <filesystem/block.h>
 
 typedef enum IDEDeviceType{
@@ -106,6 +107,8 @@ static inline int ideOutsw(u8 device,u8 reg,u64 size,void *buf)
    __attribute__ ((always_inline));
 
 static IDEPort ports[2] = {{0},{0}};
+
+static Semaphore ideSemaphores[2] = {};
 
 static IDEDevice ideDevices[2][2] = {{{0},{0}},{{0},{0}}};
 
@@ -212,7 +215,7 @@ static int ideWaitReady(u8 device)
       status = ideInb(device,IDE_REG_STATUS);
       if(!(status & IDE_STATUS_BUSY))
          break;
-      preemptionSchedule();
+      schedule();
    }
 
    return 0;
@@ -231,7 +234,7 @@ static int ideWaitDRQ(u8 device)
       }
       if((!(status & IDE_STATUS_BUSY)) && (status & IDE_STATUS_DRQ))
          break;
-      preemptionSchedule(); /*Give time to other tasks.*/
+      schedule(); /*Give time to other tasks.*/
    }
    return error;
 }
@@ -266,6 +269,7 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
    const u8 poll = getCurrentTask()->preemption > 0;
       /*If preemption is disabled,we will poll.*/
 
+   downSemaphore(&ideSemaphores[primary]);
    disablePreemption();
    ideWaitReady(primary);
    ideOutb(primary,IDE_REG_DEV_SEL,master << 4);
@@ -279,7 +283,7 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
    ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET);/*Send command.*/
 
    if(ideWaitDRQ(primary))
-      return -1;
+      goto failed;
    if(!poll)
    {
       ideWaitInterrupt(&wait,device);
@@ -290,7 +294,7 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
       ideOutsw(primary,IDE_REG_DATA,cmdSize / 2,cmd);
 
    if(ideWaitDRQ(primary))
-      return -1;
+      goto failed;
    int sizeRead = ideInb(primary,IDE_REG_LBA1);
    sizeRead |= ideInb(primary,IDE_REG_LBA2) << 8;
 
@@ -304,8 +308,13 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
       ideInsl(primary,IDE_REG_DATA,sizeRead / 4,buf);
       
    enablePreemption();
+   upSemaphore(&ideSemaphores[primary]);
    return (sizeRead == transSize) ? 0 : -1;
       /*Failed if sizeRead != transSize.*/
+failed:
+   enablePreemption();
+   upSemaphore(&ideSemaphores[primary]);
+   return -1;
 }
 
 static int ideReadSectorATAPI(IDEDevice *device,u64 lba,u8 sector,void *buf)
@@ -491,7 +500,7 @@ static int ideEnable(Device *device)
             block->data = (void *)&ideDevices[i][j];
             block->end = (u64)-1;
             registerBlockDevice(block,"cdrom");
-//            createKernelTask(&cdromTask,&ideDevices[i][j]);
+            //createKernelTask(&cdromTask,&ideDevices[i][j]);
             (void)cdromTask;
          }
       }
@@ -581,6 +590,8 @@ static int ideIRQSecondary(IRQRegisters *reg,void *data)
 
 static int initIDE(void)
 {
+   for(int i = 0;i < sizeof(ideSemaphores) / sizeof(ideSemaphores[0]);++i)
+      initSemaphore(&ideSemaphores[i]);
    registerDriver(&ideDriver);
    return 0;
 }

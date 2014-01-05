@@ -1,6 +1,8 @@
 #include <core/const.h>
 #include <task/task.h>
+#include <task/elf64.h>
 #include <memory/buddy.h>
+#include <memory/paging.h>
 #include <video/console.h>
 #include <cpu/io.h>
 #include <cpu/atomic.h>
@@ -45,13 +47,21 @@ static int scheduleFirst() __attribute__ ((noreturn));
 
 static Task *allocTask(u64 rip)
 {
-   Task *ret = (Task *)getPhysicsPageAddress(allocPages(1));
+   PhysicsPage *page = allocPages(1);
+   if(unlikely(!page))
+      return 0;
+   Task *ret = (Task *)getPhysicsPageAddress(page);
    memset(ret,0,sizeof(Task));
    ret->pid = (atomicAddRet(&pid,1) - 1);
    ret->rsp = 
       (u64)(pointer)(((u8 *)ret) + TASK_KERNEL_STACK_SIZE - 1);
    ret->rip = rip;
    ret->state = TaskSleeping;
+/*   ret->cr3 = 0;
+   ret->preemption = 0;
+   ret->root = ret->pwd = 0;
+   for(int i = 0;i < sizeof(ret->fd)/sizeof(ret->fd[0]);++i)
+      ret->fd[i] = 0;*/
    initSpinLock(&ret->lock);
 
    initList(&ret->list);
@@ -113,11 +123,19 @@ static int __switchTo(Task *prev,Task *next,u64 rip,u64 rsp) /*It will be run by
    next->state = TaskRunning;
    unlockSpinLock(&next->lock);  
 
+   tssSetStack((pointer)(((u8 *)next) + TASK_KERNEL_STACK_SIZE - 1));
    asm volatile(
+      "cmpq $0,%%rbx\n\t"
+      "je 1f\n\t"
+      "movq %%cr3,%%rdx\n\t"
+      "cmpq %%rbx,%%rdx\n\t"
+      "je 1f\n\t"
+      "movq %%rbx,%%cr3\n\t"
+      "1:\n\t" /*label next*/
       "movq %%rax,%%rsp\n\t"
       "jmp *%%rcx"
       :
-      : "a"(next->rsp),"c"(next->rip)
+      : "a"(next->rsp),"c"(next->rip),"b"(next->cr3)
    );
    return 0;
 }
@@ -145,7 +163,7 @@ TEST_TASK(D);
 
 static int idle(void)
 {
-   int doInitcalls(void);
+   int kinit(void);
 
    closeInterrupt();
    disablePreemption();
@@ -159,7 +177,7 @@ static int idle(void)
    /*finishScheduling();*/
    /*Don't need to do this,because the idle task is scheduled by scheduleFirst.*/
 
-   if(doInitcalls())
+/*   if(doInitcalls())
       goto end;
 
    char *buf[20] = {};
@@ -168,7 +186,7 @@ static int idle(void)
    if(fd < 0)
       printkInColor(0xff,0x00,0x00,"Failed!!This file doesn't exist.\n");
    else
-      doClose(fd); /*Never happen.*/
+      doClose(fd); *Never happen.*
 
    printk("Try to open file '/dev/dev.inf'.\n");
    fd = doOpen("/dev/dev.inf");
@@ -176,7 +194,7 @@ static int idle(void)
    {
       printkInColor(0x00,0xff,0x00,"Successful!Read data from it:\n");
       int size = doRead(fd,buf,sizeof(buf) - 1);
-      doClose(fd); /*Close it.*/
+      doClose(fd); *Close it.*
       buf[size] = '\0';
       printkInColor(0x00,0xff,0xff,"%s\n",buf);
    }
@@ -186,18 +204,20 @@ static int idle(void)
    if(openBlockDeviceFile("/dev/cdrom0"))
       printkInColor(0x00,0xff,0x00,"Yes!\n\n");
    else
-      printkInColor(0xff,0x00,0x00,"No!\n\n");
+      printkInColor(0xff,0x00,0x00,"No!\n\n"); */
 
-   createKernelTask(taskA,0);
-   createKernelTask(taskB,0);
-   createKernelTask(taskC,0);
-   createKernelTask(taskD,0);
+   createKernelTask((KernelTask)&kinit,0);
+
+   //createKernelTask(&taskA,0);
+   //createKernelTask(&taskB,0);
+   //createKernelTask(&taskC,0);
+   //createKernelTask(&taskD,0);
 
    enablePreemption();
    startInterrupt();
   
    schedule();
-end:
+//end:
    for(;;);
    return 0;
 }
@@ -303,11 +323,10 @@ int doFork(IRQRegisters *regs)
    regs->rflags |= (1 << 9); /*Start interrupt.*/
 
    Task *current = getCurrentTask();
-   Task *new = allocTask(0);
+   Task *new = allocTask((u64)retFromFork);
 
    new->root = current->root;
    new->pwd = current->pwd;
-   new->rip = (u64)retFromFork;
    regs->rsp = new->rsp;
    memcpy((void *)new->fd,(const void *)current->fd,sizeof(current->fd));
 
@@ -343,6 +362,16 @@ int doExit(int n)
    for(;;);
 }
 
+int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs)
+{
+   VFSFile *file = openFile(path);
+   if(!file)
+      return -1;
+   elf64Execve(file,argv,envp,regs);
+   closeFile(file);
+   return 0;
+}
+
 int createKernelTask(KernelTask task,void *arg)
 {
    int kernelTaskHelper(void); /*Fork.S .*/
@@ -352,7 +381,7 @@ int createKernelTask(KernelTask task,void *arg)
    memset(&regs,0,sizeof(regs));
 
    regs.cs = SELECTOR_KERNEL_CODE;
-   regs.ss = SELECTOR_DATA;
+   regs.ss = SELECTOR_KERNEL_DATA;
    
    regs.rbx = (u64)(pointer)task;
    regs.rip = (u64)(pointer)kernelTaskHelper;

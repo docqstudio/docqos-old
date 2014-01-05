@@ -59,7 +59,7 @@ void *memset(void *mem,u8 c,u64 len)
       {
          mem64[0] = mem64[1] = mem64[2] = mem64[3]
             = mem64[4] = mem64[5] = mem64[6] = mem64[7] = fill;
-         mem += 8;
+         mem64 += 8;
          loop -= 1;
       }
       len %= 64;

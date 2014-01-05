@@ -7,6 +7,7 @@ static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount);
 static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
 static int iso9660Open(VFSDentry *dentry,VFSFile *file);
 static int iso9660Read(VFSFile *file,void *buf,u64 size);
+static int iso9660LSeek(VFSFile *file,u64 offset);
 
 static FileSystem iso9660FileSystem = {
    .mount = &iso9660Mount,
@@ -22,7 +23,8 @@ static VFSINodeOperation iso9660INodeOperation = {
 
 static VFSFileOperation iso9660FileOperation = {
    .read = &iso9660Read,
-   .write = 0
+   .write = 0,
+   .lseek = &iso9660LSeek
 };
 
 /*See also http://wiki.osdev.org/ISO_9660.*/
@@ -175,6 +177,15 @@ static int iso9660Read(VFSFile *file,void *buf,u64 size)
       return -1;
    file->seek += size; /*Add for reading next time.*/
    return size; /*Return how many bytes we have read.*/
+}
+
+static int iso9660LSeek(VFSFile *file,u64 offset)
+{
+   VFSINode *inode = file->dentry->inode;
+   if(offset >= inode->size)
+      return -1;
+   file->seek = offset;
+   return offset;
 }
 
 static int initISO9660(void)

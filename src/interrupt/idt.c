@@ -20,6 +20,8 @@ typedef struct LongModeGate{
 #define INTERRUPT_GATE_TYPE 0x8e00 /*IST = 0 .*/
 #define TRAP_GATE_TYPE      0x8f00 /*IST = 0 .*/
 
+#define GATE_DPL3           0xe000
+
 static u8 idt[256 * sizeof(LongModeGate)];
 static u8 idtr[2 + 8];
 
@@ -30,6 +32,7 @@ extern void (*exceptionHandlers[EXP_COUNT])(void);
 /*Defined in exception.S .*/
 extern void defaultInterruptHandler(void);
 /*Defined in interrupt.S .*/
+extern void handleSystemCall(void);
 
 int setIDTGate(u8 index,u16 type, void (*handler)(void));
 
@@ -40,11 +43,12 @@ int initIDT(void)
 /*All gates in IDT are interrupt gates.*/
 
    for(int i = EXP_START_INT;i < EXP_END_INT;++i)
-      setIDTGate(i,INTERRUPT_GATE_TYPE,exceptionHandlers[i - EXP_START_INT]);
+      setIDTGate(i,TRAP_GATE_TYPE,exceptionHandlers[i - EXP_START_INT]);
    for(int i = IRQ_START_INT;i < IRQ_END_INT;++i)
       setIDTGate(i,INTERRUPT_GATE_TYPE,irqHandlers[i - IRQ_START_INT]);
 
    setIDTGate(LOCAL_TIMER_INT,INTERRUPT_GATE_TYPE,handleLocalApicTimer);
+   setIDTGate(SYSTEM_CALL_INT,TRAP_GATE_TYPE | GATE_DPL3,handleSystemCall);
 
    *(u16 *)idtr = (u16)(sizeof(idt) - 1);
    *(u64 *)(idtr + 2) = (u64)(idt); /*Init idtr.*/

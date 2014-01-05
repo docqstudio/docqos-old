@@ -4,6 +4,8 @@
 #include <cpu/io.h>
 #include <lib/string.h>
 #include <memory/paging.h>
+#include <filesystem/virtual.h>
+#include <filesystem/devfs.h>
 
 typedef struct VBEInfo{
    u8 signature[4];
@@ -94,6 +96,8 @@ typedef struct VBEModeInfo{
 
 #define FONT_TAB_WIDTH (FONT_DISPLAY_WIDTH * 0x4)
 
+static int ttyWrite(VFSFile *file,const void *buf,u64 size);
+
 extern u8 fontASC16[];
 
 static VBEInfo currentVBEInfo = {};
@@ -101,6 +105,23 @@ static VBEModeInfo currentVBEModeInfo = {};
 
 static u32 displayPosition = 0;
 static Semaphore displayLock = {};
+
+static VFSFileOperation ttyFileOperation = {
+   .lseek = 0,
+   .read = 0,
+   .write = ttyWrite
+};
+
+static int ttyWrite(VFSFile *file,const void *buf,u64 size)
+{
+   writeString((const char *)buf);
+   return 0;
+}
+
+static int initTTY(void)
+{
+   return devfsRegisterDevice(&ttyFileOperation,"tty");
+}
 
 int initVESA(void)
 {
@@ -262,3 +283,5 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
    upSemaphore(&displayLock);
    return 0;
 }
+
+driverInitcall(initTTY);

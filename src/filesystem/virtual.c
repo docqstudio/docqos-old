@@ -162,6 +162,7 @@ static VFSDentry *vfsLookUp(const char *__path)
          listAddTail(&new->list,&ret->children);
          unlockSpinLock(&ret->lock); /*Add to parent's children list.*/
          ret = new;
+         goto next;
       }
 nextUnlock:
       unlockSpinLock(&ret->lock);
@@ -248,6 +249,64 @@ failed:
    return 0;
 }
 
+VFSFile *openFile(const char *path)
+{
+   VFSDentry *dentry = vfsLookUp(path);
+   if(!dentry)
+      return 0;
+   if(dentry->type == VFSDentryDir)
+   {
+      vfsLookUpClear(dentry);
+      return 0; /*Return -1 if failed.*/
+   }
+   VFSFile *file = kmalloc(sizeof(VFSFile));
+   if(unlikely(!file))
+   {
+      vfsLookUpClear(dentry);
+      return 0;
+   }
+   file->dentry = dentry;
+   int ret = (*dentry->inode->operation->open)(dentry,file);
+   if(ret)
+   {
+      kfree(file);
+      vfsLookUpClear(dentry);
+      return 0;
+   }
+   return file;
+}
+
+int readFile(VFSFile *file,void *buf,u64 size)
+{
+   if(!file->operation->read)
+      return -1;
+   int ret = (*file->operation->read)(file,buf,size);
+   return ret; /*Call file->operation->read.*/
+}
+
+int writeFile(VFSFile *file,const void *buf,u64 size)
+{
+   if(!file->operation->write)
+      return -1;
+   int ret = (*file->operation->write)(file,buf,size);
+   return ret;
+}
+
+int lseekFile(VFSFile *file,u64 offset)
+{
+   if(!file->operation->lseek)
+      return -1;
+   return (*file->operation->lseek)(file,offset);
+}
+
+int closeFile(VFSFile *file)
+{
+   VFSDentry *dentry = file->dentry;
+   vfsLookUpClear(dentry); /*Clear it.*/
+   kfree(file);
+   return 0;
+}
+
 int doOpen(const char *path)
 {
    Task *current = getCurrentTask();
@@ -255,52 +314,53 @@ int doOpen(const char *path)
    for(fd = 0;fd < sizeof(current->fd) / sizeof(current->fd[0]);++fd)
       if(current->fd[fd] == 0)
          break; /*Found a null position in current->fd.*/
-   VFSDentry *dentry = vfsLookUp(path);
-   if(!dentry)
-      return -1;
-   if(dentry->type != VFSDentryFile)
-   {
-      vfsLookUpClear(dentry);
-      return -1; /*Return -1 if failed.*/
-   }
-   VFSFile *file = kmalloc(sizeof(VFSFile));
-   if(unlikely(!file))
-   {
-      vfsLookUpClear(dentry);
-      return -1;
-   }
-   file->dentry = dentry;
-   (*dentry->inode->operation->open)(dentry,file);
-   current->fd[fd] = file; /*Done!*/
-   return fd;
+   current->fd[fd] = openFile(path); /*Done!*/
+   return current->fd[fd] ? fd : -1;
 }
 
 int doRead(int fd,void *buf,u64 size)
 {
-   if((unsigned int)fd > TASK_MAX_FILES)
+   if((unsigned int)fd >= TASK_MAX_FILES)
       return -1;
    Task *current = getCurrentTask();
    VFSFile *file = current->fd[fd];
    if(!file)
       return -1;
-   int ret = (*file->operation->read)(file,buf,size);
-   return ret; /*Call file->operation->read.*/
+   return readFile(file,buf,size); /*Call file->operation->read.*/
+}
+
+int doWrite(int fd,const void *buf,u64 size)
+{
+   if((unsigned int)fd >= TASK_MAX_FILES)
+      return -1;
+   Task *current = getCurrentTask();
+   VFSFile *file = current->fd[fd];
+   if(!file)
+      return -1;
+   return writeFile(file,buf,size); /*Call file->operation->write.*/
+}
+
+int doLSeek(int fd,u64 offset)
+{
+   if((unsigned int)fd >= TASK_MAX_FILES)
+      return 0;
+   Task *current = getCurrentTask();
+   VFSFile *file = current->fd[fd];
+   if(!file)
+      return -1;
+   return lseekFile(file,offset);
 }
 
 int doClose(int fd)
 {
-   if((unsigned int)fd > TASK_MAX_FILES)
+   if((unsigned int)fd >= TASK_MAX_FILES)
       return -1;
    Task *current = getCurrentTask();
    VFSFile *file = current->fd[fd];
    if(!file) /*If there are no files,return -1.*/
       return -1;
-   VFSDentry *dentry = file->dentry;
-   vfsLookUpClear(dentry); /*Clear it.*/
-   
-   kfree(file);
    current->fd[fd] = 0;
-   return 0;
+   return closeFile(file);
 }
 
 int doChroot(FileSystemMount *mnt)

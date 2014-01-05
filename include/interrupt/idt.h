@@ -9,6 +9,6 @@
 #define IRQ_COUNT     (IRQ_END_INT - IRQ_START_INT)
 
 #define LOCAL_TIMER_INT 0xfe
-#define SYS_CALL_INT    0xff
+#define SYSTEM_CALL_INT 0xff
 
 int initIDT(void);

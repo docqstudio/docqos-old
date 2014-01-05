@@ -23,6 +23,7 @@ typedef struct Task{
 
    u64 rip;
    u64 rsp;
+   u64 cr3;
 
    SpinLock lock;
    ListHead list;
@@ -53,6 +54,7 @@ Task *getCurrentTask(void);
 
 int doExit(int n) __attribute__ ((noreturn));
 int doFork(IRQRegisters *reg);
+int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs);
 
 int createKernelTask(KernelTask task,void *arg);
 int wakeUpTask(Task *task);
