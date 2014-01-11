@@ -108,7 +108,7 @@ void *allocPDPTE(void *__pml4e,pointer address)
    u64 nr = (address >> 39) & 0x1ff; /*39 - 47 bits.*/
    u64 data = pml4e[nr];
    if(data & 0x1) /*Exists?*/
-      return (void *)(data & ~(0x1000 - 1));
+      return pa2va(data & ~(0x1000 - 1));
    PhysicsPage *page = allocPages(0);
    if(!page)
       return 0;
@@ -124,7 +124,7 @@ void *allocPDE(void *__pdpte,pointer address)
    u64 nr = (address >> 30) & 0x1ff; /*30 - 38 bits.*/
    u64 data = pdpte[nr];
    if(data & 0x1) /*Exists?*/
-      return (void *)(data & ~(0x1000 - 1));
+      return pa2va(data & ~(0x1000 - 1));
    PhysicsPage *page = allocPages(0);
    if(!page)
       return 0;
@@ -140,7 +140,7 @@ void *allocPTE(void *__pde,pointer address)
    u64 nr = (address >> 21) & 0x1ff; /*21 - 29 bits.*/
    u64 data = pde[nr];
    if(data & 0x1) /*Exists?*/
-      return (void *)(data & ~(0x1000 - 1));
+      return pa2va(data & ~(0x1000 - 1));
    PhysicsPage *page = allocPages(0);
    if(!page)
       return 0;
@@ -163,12 +163,11 @@ int setPTE(void *__pte,pointer address,pointer p)
 
 int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
 {
-   if(!file)
-      return -1;
    Task *current = getCurrentTask();
    void *pml4e;
+   PhysicsPage *page = 0;
    if(current->cr3)
-      pml4e = pa2va(current->cr3); /*Ingored PWD and PCD.*/
+      pml4e = pa2va(current->cr3); /*Ignore PWD and PCD.*/
    else
    {
       pml4e = allocPML4E();
@@ -181,16 +180,19 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
    if(address + len < address || address + len > PAGE_OFFSET)
       return -1; /*Can't map kernel pages.*/
    len >>= 12; /*Get pages which need map.*/
-   if(lseekFile(file,offset) < 0)
-      return -1;
+   if(file)
+      if(lseekFile(file,offset) < 0)
+         return -1;
    while(len--)
    {
-      PhysicsPage *page = allocPages(0);
+      page = allocPages(0);
       if(!page)
          goto failed;
       void *data = getPhysicsPageAddress(page);
-      if(readFile(file,data,0x1000) <= 0)
-         goto failed;
+      if(file)
+         if(readFile(file,data,0x1000) <= 0)
+            goto failed;
+      /*If file is null,map a page without data.*/
       void *pdpte = allocPDPTE(pml4e,address);
       if(!pdpte)
          goto failed;
@@ -208,5 +210,7 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
       /*Refresh TLBs.*/
    return 0;
 failed:
+   if(page)
+      freePages(page,0);
    return -1;
 }

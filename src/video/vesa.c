@@ -96,8 +96,6 @@ typedef struct VBEModeInfo{
 
 #define FONT_TAB_WIDTH (FONT_DISPLAY_WIDTH * 0x4)
 
-static int ttyWrite(VFSFile *file,const void *buf,u64 size);
-
 extern u8 fontASC16[];
 
 static VBEInfo currentVBEInfo = {};
@@ -105,23 +103,6 @@ static VBEModeInfo currentVBEModeInfo = {};
 
 static u32 displayPosition = 0;
 static Semaphore displayLock = {};
-
-static VFSFileOperation ttyFileOperation = {
-   .lseek = 0,
-   .read = 0,
-   .write = ttyWrite
-};
-
-static int ttyWrite(VFSFile *file,const void *buf,u64 size)
-{
-   writeString((const char *)buf);
-   return 0;
-}
-
-static int initTTY(void)
-{
-   return devfsRegisterDevice(&ttyFileOperation,"tty");
-}
 
 int initVESA(void)
 {
@@ -157,8 +138,6 @@ int fillRect(
    fill2 = (color >> 8) & 0xff;
    fill3 = (color >> 16) & 0xff;
 
-   u64 rflags = storeInterrupt();
-   closeInterrupt();
    vram = (u8 *)pa2va(currentVBEModeInfo.physBaseAddr);
    vram += 3*x + 3*xRes*y;
    
@@ -171,7 +150,6 @@ int fillRect(
          *(vram + i*3 + j*xRes*3 + 2) = fill3;
       }
    }
-   restoreInterrupt(rflags);
    return 0;
 }
 
@@ -229,9 +207,11 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
    char c;
    const u32 xRes = currentVBEModeInfo.xResolution;
    const u32 yRes = currentVBEModeInfo.yResolution;
+   const u8 sred = red;
+   const u8 sblue = blue;
+   const u8 sgreen = green;
 
    downSemaphore(&displayLock);
-   //disablePreemption();
    int x = displayPosition % xRes;
    int y = displayPosition / xRes;
 
@@ -260,7 +240,26 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
             x += a; 
             break;
          }
+      case '\xff':
+         c = *string++;
+         switch(c)
+         {
+         case 's':
+            red = *string++;
+            green = *string++;
+            blue = *string++;
+            break;
+         case 'r':
+            red = sred;
+            blue = sblue;
+            green = sgreen;
+            break;
+         }
+         x -= FONT_DISPLAY_WIDTH;
+         break;
       default:
+         if(c == ' ')
+            break;
          drawChar(red,green,blue,x,y,c);
          break;
       }
@@ -279,9 +278,7 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
 
    displayPosition = y * xRes + x; /*Update the next display position.*/
 
-   //enablePreemptionSchedule();
    upSemaphore(&displayLock);
    return 0;
 }
 
-driverInitcall(initTTY);

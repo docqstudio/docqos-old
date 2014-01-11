@@ -7,12 +7,14 @@ typedef int (*SystemCallHandler)(IRQRegisters *reg);
 
 static int systemExecve(IRQRegisters *regs);
 static int systemOpen(IRQRegisters *reg);
+static int systemRead(IRQRegisters *reg);
 static int systemWrite(IRQRegisters *reg);
 static int systemClose(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
    systemExecve,
    systemOpen,
+   systemRead,
    systemWrite,
    systemClose
 };
@@ -22,9 +24,14 @@ static int systemOpen(IRQRegisters *reg)
    return doOpen((const char *)reg->rbx);
 }
 
+static int systemRead(IRQRegisters *reg)
+{
+   return doRead((int)reg->rbx,(void *)reg->rcx,(u64)reg->rdx);
+}
+
 static int systemWrite(IRQRegisters *reg)
 {
-   return doWrite((int)reg->rbx,(void *)reg->rcx,(u64)reg->rdx);
+   return doWrite((int)reg->rbx,(const void *)reg->rcx,(u64)reg->rdx);
 }
 
 static int systemClose(IRQRegisters *reg)

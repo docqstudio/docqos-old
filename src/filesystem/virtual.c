@@ -313,7 +313,9 @@ int doOpen(const char *path)
    int fd;
    for(fd = 0;fd < sizeof(current->fd) / sizeof(current->fd[0]);++fd)
       if(current->fd[fd] == 0)
-         break; /*Found a null position in current->fd.*/
+         goto found; /*Found a null position in current->fd.*/
+   return -1;
+found:
    current->fd[fd] = openFile(path); /*Done!*/
    return current->fd[fd] ? fd : -1;
 }

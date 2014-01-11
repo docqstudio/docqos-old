@@ -50,7 +50,7 @@ inline int preemptionSchedule(void) __attribute__ ((always_inline));
 int schedule(void);
 int scheduleTimeout(int ms);
    /*Return 0 if timeout.*/
-Task *getCurrentTask(void);
+Task *getCurrentTask(void) __attribute__ ((const));
 
 int doExit(int n) __attribute__ ((noreturn));
 int doFork(IRQRegisters *reg);

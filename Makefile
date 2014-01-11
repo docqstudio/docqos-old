@@ -8,7 +8,7 @@ dir_src:
 dir_user:
 	cd user && $(MAKE) -f Makefile
 
-$(ISO):bin
+$(ISO):bin bin/* bin/*/*
 	$(MKISO) $(MKISOFLAGS) -o os.iso bin
 
 qrun:first

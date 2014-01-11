@@ -9,7 +9,8 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/kmalloc.o .obj/paging.o .obj/hpet.o .obj/time.o .obj/localtime.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
    .obj/pci.o .obj/ide.o .obj/semaphore.o .obj/vfs.o .obj/block.o \
-   .obj/iso9660.o .obj/devfs.o .obj/elf64.o .obj/systemcall.o
+   .obj/iso9660.o .obj/devfs.o .obj/elf64.o .obj/systemcall.o .obj/keyboard.o \
+   .obj/tty.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -42,7 +43,7 @@ cachedir:
 .obj/vesa.o:video/vesa.c ../include/video/vesa.h ../include/lib/string.h ../include/core/const.h  \
             ../include/memory/paging.h ../include/cpu/spinlock.h ../include/cpu/io.h ../include/task/task.h \
             ../include/cpu/spinlock_types.h ../include/task/semaphore.h ../include/task/waitqueue.h \
-	    ../include/cpu/atomic.h ../include/filesystem/virtual.h ../include/filesystem/devfs.h
+	    ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/font.o:video/font.c ../include/core/const.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -159,6 +160,16 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/systemcall.o:task/systemcall.c ../include/core/const.h ../include/task/task.h ../include/interrupt/interrupt.h \
                   ../include/filesystem/virtual.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/keyboard.o:input/keyboard.c ../include/core/const.h ../include/interrupt/interrupt.h ../include/cpu/io.h \
+               ../include/video/console.h ../include/task/semaphore.h ../include/task/waitqueue.h \
+	       ../include/task/task.h ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
+	       ../include/cpu/atomic.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/tty.o:video/tty.c ../include/core/const.h ../include/filesystem/virtual.h ../include/core/list.h \
+          ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
+	  ../include/interrupt/interrupt.h ../include/cpu/atomic.h ../include/filesystem/devfs.h \
+	  ../include/video/vesa.h ../include/cpu/io.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds

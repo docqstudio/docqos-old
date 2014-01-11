@@ -61,10 +61,14 @@ int elf64Execve(VFSFile *file,const char *argv[],const char *envp[],IRQRegisters
 
    for(int i = 0;i < sizeof(phdrs) / sizeof(phdrs[0]);++i)
       doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz);
+   doMMap(0,0,0xffffe000,0x2000);
+       /*Map the user stack,from 0xffffe000 to 0xffffffff.*/
+       /*(4GB - 8K) ~ 4GB.*/
+
    regs->rip = header.entry; /*Set rip,cs,ss,rsp and rflags.*/
    regs->cs = SELECTOR_USER_CODE;
    regs->ss = SELECTOR_USER_DATA;
-   regs->rsp = 0;
+   regs->rsp = 0xffffffff;
    regs->rflags = storeInterrupt(); /*Interrupts should be started.*/
    return 0;
 }
