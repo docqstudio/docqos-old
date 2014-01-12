@@ -62,7 +62,7 @@ inline int removeFromWaitQueueLocked(WaitQueue *wait)
    return listDelete(&wait->list);
 }
 
-/*These functions below do this things:*/
+/*These functions below do these things:*/
 /*1.lock a spin lock.*/
 /*2.call *Locked.*/
 /*3.unlock the spin lock.*/

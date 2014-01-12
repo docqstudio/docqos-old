@@ -240,21 +240,31 @@ int writeStringInColor(u8 red,u8 green,u8 blue,const char *string)
             x += a; 
             break;
          }
-      case '\xff':
+      case '\xff': /*Extand command.*/
          c = *string++;
          switch(c)
          {
-         case 's':
+         case 's': /*Set color command.*/
             red = *string++;
             green = *string++;
             blue = *string++;
             break;
-         case 'r':
+         case 'r': /*Restore color command.*/
             red = sred;
             blue = sblue;
             green = sgreen;
             break;
          }
+         x -= FONT_DISPLAY_WIDTH;   /*Offset x += FONT_DISPLAY_WIDTH;*/
+         break;
+      case '\b':
+         x -= FONT_DISPLAY_WIDTH;
+         if(x < 0)
+         {
+            y -= FONT_DISPLAY_HEIGHT;
+            x = xRes - xRes % FONT_DISPLAY_HEIGHT;
+         }
+         fillRect(0x00,0x00,0x00,x,y,FONT_DISPLAY_WIDTH,FONT_DISPLAY_HEIGHT);
          x -= FONT_DISPLAY_WIDTH;
          break;
       default:

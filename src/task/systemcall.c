@@ -10,13 +10,19 @@ static int systemOpen(IRQRegisters *reg);
 static int systemRead(IRQRegisters *reg);
 static int systemWrite(IRQRegisters *reg);
 static int systemClose(IRQRegisters *reg);
+static int systemFork(IRQRegisters *reg);
+static int systemExit(IRQRegisters *reg);
+static int systemWaitPID(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
    systemExecve,
    systemOpen,
    systemRead,
    systemWrite,
-   systemClose
+   systemClose,
+   systemFork,
+   systemExit,
+   systemWaitPID
 };
 
 static int systemOpen(IRQRegisters *reg)
@@ -42,6 +48,24 @@ static int systemClose(IRQRegisters *reg)
 static int systemExecve(IRQRegisters *reg)
 {
    return doExecve((const char *)reg->rbx,0,0,reg);
+}
+
+static int systemFork(IRQRegisters *reg)
+{
+   IRQRegisters __reg = *reg;
+   __reg.rax = 0;
+   int ret = doFork(&__reg,ForkShareNothing);
+   return ret;
+}
+
+static int systemWaitPID(IRQRegisters *reg)
+{
+   return doWaitPID((u32)reg->rbx,(int *)reg->rcx,(u8)reg->rdx);
+}
+
+static int systemExit(IRQRegisters *reg)
+{
+   return doExit((int)reg->rbx);
 }
 
 int doSystemCall(IRQRegisters *reg)

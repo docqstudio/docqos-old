@@ -34,6 +34,8 @@ static int ttyRead(VFSFile *file,void *buf,u64 size)
 {
    if(size <= 1)
       return -1;
+   if(size >= sizeof(ttyReader.buf) / sizeof(ttyReader.buf[0]))
+      return -1;
    Task *current = getCurrentTask();
    u64 rflags;
    lockSpinLockDisableInterrupt(&ttyReader.lock,&rflags);
@@ -65,7 +67,6 @@ int ttyKeyboardPress(char i)
 {
    u64 rflags;
    char string[2] = {i,'\0'};
-   writeString(string);
    lockSpinLockDisableInterrupt(&ttyReader.lock,&rflags);
    if(!ttyReader.reader) /*If no readers,just goto out.*/
       goto out;
@@ -73,18 +74,32 @@ int ttyKeyboardPress(char i)
       goto out;
    if(i == '\n') 
       goto wakeUp; /*Wake up the reader.*/
+   if(i == '\b')
+   {
+      if(ttyReader.pos)
+         --ttyReader.pos;
+      else
+         goto ret;
+      goto out;
+   }
    ttyReader.buf[ttyReader.pos++] = i;
    if(ttyReader.pos == ttyReader.size) /*If the buffer is full,wake up the reader.*/
       goto wakeUp;
 out:
    unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
+   writeString(string);
+   return 0;
+ret:
+   unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
    return 0;
 wakeUp:
    ttyReader.buf[ttyReader.pos] = '\0'; /*Set end.*/
    unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   string[0] = '\n';
+   string[0] = i;
    if(i != '\n')
       writeString(string);
+   string[0] = '\n';
+   writeString(string);
    wakeUpTask(ttyReader.reader); /*Wake up the reader!*/
    return 0;
 }

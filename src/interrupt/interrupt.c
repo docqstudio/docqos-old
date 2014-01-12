@@ -42,7 +42,7 @@ int doIRQ(IRQRegisters *reg)
 
       info = &irqHandlerTable[reg->irq];
       if(info->handler == 0)
-         return 0; /*We needn't to enable thias IRQ,it should be disabled.*/
+         return 0; /*We needn't to enable this IRQ,it should be disabled.*/
       startInterrupt();
 
       ret = (*info->handler)(reg,info->data);
@@ -61,7 +61,7 @@ int doIRQ(IRQRegisters *reg)
 
 int requestIRQ(u8 irq,IRQHandler handler)
 {
-   if(irq > IRQ_COUNT)
+   if(irq >= IRQ_COUNT)
       return -1;
    if(irqHandlerTable[irq].handler)
       return -1;
@@ -77,7 +77,7 @@ int requestIRQ(u8 irq,IRQHandler handler)
 
 int setIRQData(u8 irq,void *data)
 {
-   if(irq > IRQ_COUNT)
+   if(irq >= IRQ_COUNT)
       return -1;
    if(!irqHandlerTable[irq].handler)
       return -1;
@@ -87,7 +87,7 @@ int setIRQData(u8 irq,void *data)
 
 int freeIRQ(u8 irq)
 {
-   if(irq > IRQ_COUNT)
+   if(irq >= IRQ_COUNT)
       return -1;
    irqHandlerTable[irq].handler = 0;
    irqHandlerTable[irq].data = 0;

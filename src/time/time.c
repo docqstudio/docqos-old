@@ -105,9 +105,9 @@ int removeTimer(Timer *timer)
    listDelete(&timer->list); 
       /*A list can be deleted more than one times.*/
       /*So this will never be failed.*/
-   if(!timer->onStack)
-      kfree(timer);
 
    unlockSpinLockRestoreInterrupt(&timerLock,&rflags);
+   if(!timer->onStack)
+      kfree(timer);
    return 0;
 }

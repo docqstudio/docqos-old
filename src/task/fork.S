@@ -10,6 +10,7 @@
 .code64
 
 retFromFork:
+   movq %rax,%rdi
    call finishScheduling
    RESTORE_ALL
    addq $8,%rsp

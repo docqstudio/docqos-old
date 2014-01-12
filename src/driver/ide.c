@@ -363,7 +363,7 @@ static int ideRead(void *data,u64 start,u64 size,void *buf)
             return 0;
       }
       int count = size / ATAPI_SECTOR_SIZE;
-      if(size % ATAPI_SECTOR_SIZE != 0)
+      if(start % ATAPI_SECTOR_SIZE != 0)
          --count;
       while(count > 0)
       {

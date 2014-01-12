@@ -1,8 +1,9 @@
 #include <core/const.h>
 #include <interrupt/interrupt.h>
 #include <cpu/io.h>
+#include <cpu/spinlock.h>
 #include <video/console.h>
-#include <task/semaphore.h>
+#include <task/task.h>
 
 #define KB_DATA   0x60
 #define KB_STATUS 0x64
@@ -10,6 +11,7 @@
 #define KB_STATUS_BUSY    0x2
 #define KB_STATUS_DATA    0x1
 
+#define KB_CMD_LED        0xed
 #define KB_CMD_IDENTIFY   0xf2
 #define KB_CMD_ESCAN      0xf4
 #define KB_CMD_DSCAN      0xf5
@@ -24,7 +26,7 @@ static const u8 keyboardMap[] = {
    '\0','\0','1' ,'2',
    '3' ,'4' ,'5' ,'6' ,
    '7' ,'8' ,'9' ,'0' ,
-   '-' ,'=' ,'\0','\t',
+   '-' ,'=' ,'\b','\t',
    'q' ,'w' ,'e' ,'r' ,
    't' ,'y' ,'u' ,'i' ,
    'o' ,'p' ,'[' ,']' ,
@@ -34,14 +36,44 @@ static const u8 keyboardMap[] = {
    '\'','`' ,'\0','\\',
    'z' ,'x' ,'c' ,'v' ,
    'b' ,'n' ,'m' ,',' ,
-   '.' ,'/' ,'\0','\0',
-   '\0',' ' ,'\0','\0' /*A very simple keyboard map.*/
+   '.' ,'/' ,'\0','*' ,
+   '\0',' ' ,'\0','\0',
+   '\0','\0','\0','\0',
+   '\0','\0','\0','\0',
+   '\0','\0','\0','7' ,
+   '8' ,'9' ,'-' ,'4' ,
+   '5' ,'6' ,'+' ,'1' ,
+   '2' ,'3' ,'0' ,'.'
+};
+
+static const u8 keyboardMapShift[] = {
+   '\0','\0','!' ,'@' ,
+   '#' ,'$' ,'%' ,'^' ,
+   '&' ,'*' ,'(' ,')' ,
+   '_' ,'+' ,'\b','\t',
+   'q' ,'w' ,'e' ,'r' ,
+   't' ,'y' ,'u' ,'i' ,
+   'o' ,'p' ,'{' ,'}' ,
+   '\n','\0','a' ,'s' ,
+   'd' ,'f' ,'g' ,'h' ,
+   'j' ,'k' ,'l' ,':' ,
+   '\"','~' ,'\0','|' ,
+   'z' ,'x' ,'c' ,'v' ,
+   'b' ,'n' ,'m' ,'<' ,
+   '>' ,'?' ,'\0','*' ,
+   '\0',' ' ,'\0','\0',
+   '\0','\0','\0','\0',
+   '\0','\0','\0','\0',
+   '\0','\0','\0','7' ,
+   '8' ,'9' ,'-' ,'4' ,
+   '5' ,'6' ,'+' ,'1' ,
+   '2' ,'3' ,'0' ,'.'
 };
 
 static u8 keyboardBuffer[128];
 static int keyboardRead = 0,keyboardWrite = 0;
 static SpinLock keyboardLock;
-static Semaphore keyboardSemaphore;
+static Task *keyboardTask;
 
 static int keyboardOut(int data)
 {
@@ -60,45 +92,115 @@ static int keyboardIn(void)
    return inb(KB_DATA);
 }
 
-static int keyboardIRQ(IRQRegisters *reg,void *data)
+static int keyboardTestIn(void)
 {
-   u64 rflags;
-   u8 i = inb(KB_DATA); /*Get scan code and put it into keyboardBuffer.*/
-   lockSpinLockDisableInterrupt(&keyboardLock,&rflags);
-   keyboardBuffer[keyboardWrite++] = i;
-   if(keyboardWrite == sizeof(keyboardBuffer)/sizeof(keyboardBuffer[0]))
-      keyboardWrite = 0;
-   unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
-   upSemaphore(&keyboardSemaphore); /*Wake up keyboardTask.*/
+   if(inb(KB_STATUS) & KB_STATUS_DATA)
+      return (inb(KB_DATA),1);
    return 0;
 }
 
-static int keyboardTask(void *data)
+static int keyboardIRQ(IRQRegisters *reg,void *unused)
 {
-   downSemaphore(&keyboardSemaphore);
+   u64 rflags;
+   u8 status,data;
+   lockSpinLockDisableInterrupt(&keyboardLock,&rflags);
+   do{
+      data = inb(KB_DATA); /*Get scan code and put it into keyboardBuffer.*/
+      keyboardBuffer[keyboardWrite++] = data;
+      if(keyboardWrite == sizeof(keyboardBuffer)/sizeof(keyboardBuffer[0]))
+         keyboardWrite = 0;
+      status = inb(KB_STATUS);
+   }while(status & KB_STATUS_DATA);
+   wakeUpTask(keyboardTask);
+   unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
+   return 0;
+}
+
+static int __keyboardTask(void *data)
+{
+   u8 shift = 0,caps = 0,num = 1,scroll = 0;
+   keyboardTask = getCurrentTask();
+   //keyboardOut(KB_CMD_LED);
+   //keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
    for(;;)
    {
-      downSemaphore(&keyboardSemaphore); /*See also keyboardIRQ.*/
       u64 rflags;
-      u8 i;
+      u8 i,keypad = 0;
       lockSpinLockDisableInterrupt(&keyboardLock,&rflags);
+      if(keyboardRead == keyboardWrite)
+      {
+         keyboardTask->state = TaskStopping;
+         unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
+         schedule();
+         continue;
+      }
+reget:
       i = keyboardBuffer[keyboardRead++];
       if(keyboardRead == sizeof(keyboardBuffer)/sizeof(keyboardBuffer[0]))
          keyboardRead = 0;
+      if(i == 0xe0)
+         goto reget;
       unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
          /*Get scan code.*/
 
-      if(i & 0x80)
-         continue; /*Ingnore break code.*/
-      if(i < sizeof(keyboardMap)/sizeof(keyboardMap[0]))
-         if(keyboardMap[i] != '\0') /*Can print?*/
-            ttyKeyboardPress(keyboardMap[i]); /*Tell tty.*/
+      u8 make = !(i & 0x80);
+      i &= 0x7f;
+      switch(i)
+      {
+      case 0x2a:
+      case 0x36:
+         shift = !!make;
+         break;
+      case 0x3a:
+         if(!make)
+            break;
+         caps = !caps;
+     //    keyboardOut(KB_CMD_LED);
+     //    keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+         break;
+      case 0x45:
+         if(!make)
+            break;
+         num = !num;
+      //   keyboardOut(KB_CMD_LED);
+      //   keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+      case 0x46:
+         if(!make)
+            break;
+         scroll = !scroll;
+   //      keyboardOut(KB_CMD_LED);
+   //      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+         break;
+      default:
+         if(!make)
+            break;
+         if(i >= sizeof(keyboardMap) / sizeof(keyboardMap[0]))
+            break;
+         if(0x47 <= i && i <= 0x53)
+            keypad = 1;
+         if(shift)
+            i = keyboardMapShift[i];
+         else
+            i = keyboardMap[i];
+         if(!i)
+            break;
+         if(('0' <= i) && (i <= '9') && keypad)
+            if(!num)
+               break;
+         if(('a' <= i) && (i <= 'z'))
+            if(shift ^ caps)
+               i -= 'a' - 'A';
+         ttyKeyboardPress(i); /*Tell tty.*/
+         break;
+      }
    }
    return 0;
 }
 
 static int initKeyboard(void)
 {
+   while(keyboardTestIn())
+      asm volatile("pause;hlt");
    if(keyboardOut(KB_CMD_DSCAN) != KB_DATA_ACK)
       return 0;
    if(keyboardOut(KB_CMD_IDENTIFY) != KB_DATA_ACK)
@@ -113,10 +215,11 @@ static int initKeyboard(void)
    if(keyboardOut(KB_CMD_ESCAN) != KB_DATA_ACK)
       return -1; /*Exist,but failed to init it.*/
 
+   keyboardRead = keyboardWrite = 0;
+   keyboardTask = 0;
    initSpinLock(&keyboardLock);
-   initSemaphore(&keyboardSemaphore);
    requestIRQ(KB_IRQ,&keyboardIRQ);
-   createKernelTask(&keyboardTask,0);
+   createKernelTask(&__keyboardTask,0);
    return 0;
 }
 

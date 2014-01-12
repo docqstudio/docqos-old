@@ -2,6 +2,7 @@
 #include <core/const.h>
 #include <core/list.h>
 #include <cpu/spinlock_types.h>
+#include <cpu/atomic.h>
 #include <interrupt/interrupt.h>
 
 #define TASK_KERNEL_STACK_SIZE (4096*2)
@@ -9,29 +10,62 @@
 
 typedef struct VFSDentry VFSDentry;
 typedef struct VFSFile VFSFile;
+typedef struct Semaphore Semaphore;
+typedef struct Task Task;
+
+typedef enum ForkFlags{
+   ForkShareNothing = 0,
+   ForkShareMemory  = 1,
+   ForkShareFiles   = 2,
+   ForkShareFileSystem = 4,
+   ForkWait         = 8,
+   ForkKernel       = 16
+} ForkFlags;
 
 typedef enum TaskState{
    TaskRunning,
    TaskSleeping,
    TaskStopping,
-   TaskExited
+   TaskZombie
 } TaskState;
+
+typedef struct TaskFileSystem{
+   AtomicType ref;
+   VFSDentry *root;
+   VFSDentry *pwd;
+} TaskFileSystem;
+
+typedef struct TaskFiles{
+   AtomicType ref;
+   VFSFile *fd[TASK_MAX_FILES];
+} TaskFiles;
+
+typedef struct TaskMemory{
+   void *page;
+   AtomicType ref;
+   Semaphore *wait;
+} TaskMemory;
 
 typedef struct Task{
    TaskState state;
+   Task *parent;
    u32 pid;
 
    u64 rip;
    u64 rsp;
-   u64 cr3;
 
-   SpinLock lock;
    ListHead list;
+   ListHead children;
+   ListHead sibling;
 
    u32 preemption;
-   VFSDentry *root;
-   VFSDentry *pwd;
-   VFSFile *fd[TASK_MAX_FILES];
+   TaskFiles *files;
+   TaskFileSystem *fs;
+   TaskMemory *mm;
+   TaskMemory *activeMM;
+
+   u8 waiting;
+   int exitCode;
 } Task;
 
 typedef union TaskKernelStack
@@ -53,8 +87,9 @@ int scheduleTimeout(int ms);
 Task *getCurrentTask(void) __attribute__ ((const));
 
 int doExit(int n) __attribute__ ((noreturn));
-int doFork(IRQRegisters *reg);
+int doFork(IRQRegisters *reg,ForkFlags flags);
 int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs);
+int doWaitPID(u32 pid,int *result,u8 wait);
 
 int createKernelTask(KernelTask task,void *arg);
 int wakeUpTask(Task *task);
@@ -93,5 +128,7 @@ inline int preemptionSchedule(void)
    Task *current = getCurrentTask();
    if(current->preemption)
       return 0;
-   return schedule();
+   if(current->state == TaskRunning || current->state == TaskSleeping)
+      schedule();
+   return 0;
 }

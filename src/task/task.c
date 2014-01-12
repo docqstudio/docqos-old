@@ -1,6 +1,7 @@
 #include <core/const.h>
 #include <task/task.h>
 #include <task/elf64.h>
+#include <task/semaphore.h>
 #include <memory/buddy.h>
 #include <memory/paging.h>
 #include <video/console.h>
@@ -13,7 +14,7 @@
 #include <time/time.h>
 #include <filesystem/virtual.h>
 
-#define switchTo(prev,next) \
+#define switchTo(prev,next,from) \
    asm volatile( \
       "pushfq\n\t" \
       "pushq %%rbp\n\t" \
@@ -23,15 +24,24 @@
       "1:\n\t" \
       "popq %%rbp\n\t" /*We need to restore %ebp.*/ \
                       /*Or this code won't work.*/ \
-      "popfq" \
-      : \
+      "popfq\n\t" \
+      "movq %%rax,%%rax" \
+      : "=a"(from) \
       : "D" (prev),"S" (next) \
-      : "%rax","%rbx","%rcx","%rdx","%r8","%r9","%r10", \
+      : "%rbx","%rcx","%rdx","%r8","%r9","%r10", \
         "%r11","%r12","%r13","%r14","%r15","memory" \
         /*All registers.*/ \
    );
 
 extern void *endAddressOfKernel;
+
+extern int taskSwitchMemory(TaskMemory *old,TaskMemory *new);
+extern TaskFileSystem *taskForkFileSystem(TaskFileSystem *old,ForkFlags flags);
+extern TaskFiles *taskForkFiles(TaskFiles *old,ForkFlags flags);
+extern TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags);
+extern int taskExitFileSystem(TaskFileSystem *old);
+extern int taskExitFiles(TaskFiles *old);
+extern int taskExitMemory(TaskMemory *old);
 
 static SpinLock scheduleLock = {};
 
@@ -62,8 +72,9 @@ static Task *allocTask(u64 rip)
    ret->root = ret->pwd = 0;
    for(int i = 0;i < sizeof(ret->fd)/sizeof(ret->fd[0]);++i)
       ret->fd[i] = 0;*/
-   initSpinLock(&ret->lock);
 
+   initList(&ret->children);
+   initList(&ret->sibling);
    initList(&ret->list);
    return ret;
 }
@@ -87,12 +98,13 @@ static Task *createTask(u64 rip)
 }
 
 static int destoryTask(Task *task)
-{  
-   /*When we come to the function,we have locked*/
-   /*scheduleLock and task->lock.So we shoudn't lock them again.*/
-   task->state = TaskExited; 
+{
+   u64 rflags;
+   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
+   listDelete(&task->sibling);
    listDelete(&task->list);
 
+   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
    freePages(getPhysicsPage(task),1);
    return 0;
 }
@@ -101,65 +113,39 @@ static int __switchTo(Task *prev,Task *next,u64 rip,u64 rsp) /*It will be run by
 {
    if(prev)
    {
-      lockSpinLock(&prev->lock);
-      if((prev->state == TaskRunning) || (prev->state == TaskSleeping))
+      switch(prev->state)
       {
-         prev->state = TaskSleeping;
-         prev->rip = rip;
-         prev->rsp = rsp;
-         unlockSpinLock(&prev->lock);
-      }else if(prev->state == TaskExited)
-      {
-         destoryTask(prev);
-         /*We don't need to unlock prev->lock.*/
-      }else if(prev->state == TaskStopping)
-      {
-         prev->rip = rip;
-         prev->rsp = rsp;
-         unlockSpinLock(&prev->lock);
+         case TaskRunning:
+            prev->state = TaskSleeping;
+         case TaskSleeping:
+         case TaskStopping:
+            prev->rip = rip;
+            prev->rsp = rsp;
+            break;
+         case TaskZombie:
+         default:
+            break;
       }
    }
-   lockSpinLock(&next->lock);
    next->state = TaskRunning;
-   unlockSpinLock(&next->lock);  
 
    tssSetStack((pointer)(((u8 *)next) + TASK_KERNEL_STACK_SIZE - 1));
    asm volatile(
-      "cmpq $0,%%rbx\n\t"
-      "je 1f\n\t"
-      "movq %%cr3,%%rdx\n\t"
-      "cmpq %%rbx,%%rdx\n\t"
-      "je 1f\n\t"
-      "movq %%rbx,%%cr3\n\t"
-      "1:\n\t" /*label next*/
       "movq %%rax,%%rsp\n\t"
+      "movq %%rdx,%%rax\n\t"
       "jmp *%%rcx"
       :
-      : "a"(next->rsp),"c"(next->rip),"b"(next->cr3)
+      : "a"(next->rsp),"c"(next->rip),"d"(prev)
    );
    return 0;
 }
 
 static int scheduleFirst(void)
 {
-   switchTo(0,idleTask); /*It will nerver return.*/
+   Task *from;
+   switchTo(0,idleTask,from); /*It will nerver return.*/
    for(;;);
 }
-
-/*Define a task.*/
-#define TEST_TASK(name) \
-/*static*/ int task##name(void *arg __attribute__ ((unused)))\
-{ \
-   Task *cur = getCurrentTask(); \
-   printk("Hi!I'm Task " #name ".My PID is %d.\n",cur->pid); \
-   printk("(Task " #name ")Now I'm ready to exit.\n"); \
-   return 0; \
-}
-
-TEST_TASK(A);
-TEST_TASK(B);
-TEST_TASK(C);
-TEST_TASK(D);
 
 static int idle(void)
 {
@@ -177,47 +163,13 @@ static int idle(void)
    /*finishScheduling();*/
    /*Don't need to do this,because the idle task is scheduled by scheduleFirst.*/
 
-/*   if(doInitcalls())
-      goto end;
-
-   char *buf[20] = {};
-   printk("\nTry to open file 'test1.c'.\n");
-   int fd = doOpen("test1.c");
-   if(fd < 0)
-      printkInColor(0xff,0x00,0x00,"Failed!!This file doesn't exist.\n");
-   else
-      doClose(fd); *Never happen.*
-
-   printk("Try to open file '/dev/dev.inf'.\n");
-   fd = doOpen("/dev/dev.inf");
-   if(fd >= 0)
-   {
-      printkInColor(0x00,0xff,0x00,"Successful!Read data from it:\n");
-      int size = doRead(fd,buf,sizeof(buf) - 1);
-      doClose(fd); *Close it.*
-      buf[size] = '\0';
-      printkInColor(0x00,0xff,0xff,"%s\n",buf);
-   }
-   printk("Run 'mount -t devfs devfs /dev'.\n");
-   doMount("/dev",lookForFileSystem("devfs"),0);
-   printk("Next,check if '/dev/cdrom0' exists:");
-   if(openBlockDeviceFile("/dev/cdrom0"))
-      printkInColor(0x00,0xff,0x00,"Yes!\n\n");
-   else
-      printkInColor(0xff,0x00,0x00,"No!\n\n"); */
-
-   createKernelTask((KernelTask)&kinit,0);
-
-   //createKernelTask(&taskA,0);
-   //createKernelTask(&taskB,0);
-   //createKernelTask(&taskC,0);
-   //createKernelTask(&taskD,0);
+   createKernelTask((KernelTask)kinit,0);
 
    enablePreemption();
    startInterrupt();
   
    schedule();
-//end:
+
    for(;;);
    return 0;
 }
@@ -242,11 +194,17 @@ Task *getCurrentTask(void)
    return (Task *)ret;
 }
 
-int finishScheduling(void) /*It will be called in retFromFork,schedule etc.*/
+int finishScheduling(Task *from) /*It will be called in retFromFork,schedule etc.*/
 {
    Task *cur = getCurrentTask();
    if(cur->preemption == 0) /*First run.*/
       disablePreemption(); /*It will be enabled when we unlock spin lock.*/
+   if(!from->mm) /*Kernel Task?*/
+   {
+      if(from->activeMM)
+         taskExitMemory(from->activeMM); /*Exit.*/
+      from->activeMM = from->mm = 0;
+   }
    unlockSpinLockEnableInterrupt(&scheduleLock);
    return 0;
 }
@@ -255,6 +213,7 @@ int schedule(void)
 {
    Task *prev = getCurrentTask();
    Task *next = 0;
+   Task *from;
    ListHead *start = (prev == idleTask) ? &tasks : &prev->list;
 
    u64 rflags;
@@ -284,9 +243,15 @@ int schedule(void)
       unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
       return 0;
    }
-   switchTo(prev,next);
 
-   finishScheduling();
+   if(!next->mm) /*Switch to kernel Task?*/
+      next->activeMM = taskForkMemory(prev->mm,ForkShareMemory);
+   else /*Kernel task always uses previous task's mm.*/
+      next->activeMM = next->mm; 
+   taskSwitchMemory(prev->activeMM,next->activeMM);
+   switchTo(prev,next,from);
+
+   finishScheduling(from);
    return 0;
 }
 
@@ -316,24 +281,42 @@ int scheduleTimeout(int ms)
    return expire;
 }
 
-int doFork(IRQRegisters *regs)
+int doFork(IRQRegisters *regs,ForkFlags flags)
 {
    int retFromFork(void);/*Fork.S*/
 
+   Semaphore wait;
+   initSemaphore(&wait);
+   downSemaphore(&wait);
    regs->rflags |= (1 << 9); /*Start interrupt.*/
 
    Task *current = getCurrentTask();
    Task *new = allocTask((u64)retFromFork);
 
-   new->root = current->root;
-   new->pwd = current->pwd;
-   regs->rsp = new->rsp;
-   memcpy((void *)new->fd,(const void *)current->fd,sizeof(current->fd));
+   if(regs->rsp == (u64)-1)
+      regs->rsp = new->rsp;
+
+   new->parent = current;
+   listAdd(&new->sibling,&new->parent->children);
+
+   new->activeMM = new->mm = 
+      taskForkMemory(current->mm,flags);
+   new->fs = taskForkFileSystem(current->fs,flags);
+   new->files = taskForkFiles(current->files,flags);
+       /*Copy mm,fs and files.*/
 
    *(IRQRegisters *)(new->rsp -= sizeof(*regs))
       = *regs; /*They will be popped in retFromFork.*/
 
+   if(flags & ForkWait)
+      new->mm->wait = &wait;
+
    addTask(new);
+   if(flags & ForkWait)
+   {
+      downSemaphore(&wait); /*Wait for exit or execve.*/
+      new->mm->wait = 0;
+   }
 
    return new->pid;
 }
@@ -347,19 +330,71 @@ int doExit(int n)
          "IDLE Task Called Exit!!!\n\n");
       for(;;); /*IDLE Task should never be exited.*/
    }
-   u64 rflags;
-   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
 
-   lockSpinLock(&current->lock);
-   current->state = TaskExited;
-      /*This task will really be destoried in __switchTo.*/
-   unlockSpinLock(&current->lock);
+   current->exitCode = n;
+   taskExitMemory(current->mm);
+   taskExitFileSystem(current->fs);
+   taskExitFiles(current->files);
+        /*Exit mm,files and files.*/
+   current->mm = 0;
+   current->fs = 0;
+   current->files = 0;
 
-   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
+   current->state = TaskZombie; /*Set current to a zombie task.*/
+   if(current->parent->waiting)
+      wakeUpTask(current->parent); /*If parent is waiting,wake up.*/
    
    schedule();
 
    for(;;);
+}
+
+int doWaitPID(u32 pid,int *result,u8 nowait)
+{
+   Task *current = getCurrentTask();
+   Task *child;
+retry:;
+   u8 has = 0;
+   current->state = TaskStopping;
+   current->waiting = 1; /*Tell the children that their parent is waiting.*/
+   for(ListHead *list = current->children.next;list != &current->children;list = list->next)
+   {
+      child = listEntry(list,Task,sibling);
+      if(pid > 0)
+         if(child->pid != pid)
+            continue;
+      has = 1;
+      switch(child->state)
+      {
+      case TaskZombie:
+         goto found;  /*Found a zombie child.*/
+      default:
+         break;
+      }
+   }
+   if(!has)
+   {
+      current->waiting = 0;
+      current->state = TaskRunning;
+      return -1;
+   }
+   if(nowait) /*If we needn't wait,return -1.*/
+   {
+      current->waiting = 0;
+      current->state = TaskRunning;
+      return -1;
+   }
+   schedule(); /*Wait for a zombie child.*/
+                /*Wake up in doExit.*/
+   goto retry;
+found:
+   if(result)
+      *result = child->exitCode; /*Save exit code to *result.*/
+   pid = child->pid;      /*Return the zombie child's pid.*/
+   destoryTask(child); /*Destory the zombie child.*/
+   current->waiting = 0;     /*The current task is not waiting.*/
+   current->state = TaskRunning;      /*Restore the current task to TaskRunning state.*/
+   return pid;
 }
 
 int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs)
@@ -367,6 +402,9 @@ int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters
    VFSFile *file = openFile(path);
    if(!file)
       return -1;
+   if(getCurrentTask()->mm)
+      taskExitMemory(getCurrentTask()->mm);
+   getCurrentTask()->mm = 0;
    elf64Execve(file,argv,envp,regs);
    closeFile(file);
    return 0;
@@ -388,26 +426,22 @@ int createKernelTask(KernelTask task,void *arg)
       /*See also fork.S .*/
    regs.rdi = (u64)(pointer)arg;
 
+   regs.rsp = (u64)-1;
    regs.rflags = storeInterrupt();
-   doFork(&regs);
+   doFork(&regs,ForkKernel);
 
    return 0;
 }
 
 int wakeUpTask(Task *task)
 {
-   u64 rflags;
-   lockSpinLockDisableInterrupt(&scheduleLock,&rflags);
-   lockSpinLock(&task->lock);
-
+   if(!task)
+      return -1;
    do{
       if(task->state != TaskStopping)
          break;
       task->state = TaskSleeping;
    }while(0);
-
-   unlockSpinLock(&task->lock);
-   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
    return 0;
 }
 

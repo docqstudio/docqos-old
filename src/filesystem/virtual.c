@@ -91,9 +91,9 @@ static VFSDentry *vfsLookUp(const char *__path)
    u8 error = 0; /*Copy path for writing.*/
    memcpy((void *)path,(const void *)__path,length + 1);
    if(*path == '/')
-      ret = getCurrentTask()->root;
+      ret = getCurrentTask()->fs->root;
    else
-      ret = getCurrentTask()->pwd;
+      ret = getCurrentTask()->fs->pwd;
    {
       VFSDentry *parent,*child = ret;
       while((parent = child->parent))
@@ -311,13 +311,14 @@ int doOpen(const char *path)
 {
    Task *current = getCurrentTask();
    int fd;
-   for(fd = 0;fd < sizeof(current->fd) / sizeof(current->fd[0]);++fd)
-      if(current->fd[fd] == 0)
+   for(fd = 0;
+      fd < sizeof(current->files->fd) / sizeof(current->files->fd[0]);++fd)
+      if(current->files->fd[fd] == 0)
          goto found; /*Found a null position in current->fd.*/
    return -1;
 found:
-   current->fd[fd] = openFile(path); /*Done!*/
-   return current->fd[fd] ? fd : -1;
+   current->files->fd[fd] = openFile(path); /*Done!*/
+   return current->files->fd[fd] ? fd : -1;
 }
 
 int doRead(int fd,void *buf,u64 size)
@@ -325,7 +326,7 @@ int doRead(int fd,void *buf,u64 size)
    if((unsigned int)fd >= TASK_MAX_FILES)
       return -1;
    Task *current = getCurrentTask();
-   VFSFile *file = current->fd[fd];
+   VFSFile *file = current->files->fd[fd];
    if(!file)
       return -1;
    return readFile(file,buf,size); /*Call file->operation->read.*/
@@ -336,7 +337,7 @@ int doWrite(int fd,const void *buf,u64 size)
    if((unsigned int)fd >= TASK_MAX_FILES)
       return -1;
    Task *current = getCurrentTask();
-   VFSFile *file = current->fd[fd];
+   VFSFile *file = current->files->fd[fd];
    if(!file)
       return -1;
    return writeFile(file,buf,size); /*Call file->operation->write.*/
@@ -347,7 +348,7 @@ int doLSeek(int fd,u64 offset)
    if((unsigned int)fd >= TASK_MAX_FILES)
       return 0;
    Task *current = getCurrentTask();
-   VFSFile *file = current->fd[fd];
+   VFSFile *file = current->files->fd[fd];
    if(!file)
       return -1;
    return lseekFile(file,offset);
@@ -358,19 +359,19 @@ int doClose(int fd)
    if((unsigned int)fd >= TASK_MAX_FILES)
       return -1;
    Task *current = getCurrentTask();
-   VFSFile *file = current->fd[fd];
+   VFSFile *file = current->files->fd[fd];
    if(!file) /*If there are no files,return -1.*/
       return -1;
-   current->fd[fd] = 0;
+   current->files->fd[fd] = 0;
    return closeFile(file);
 }
 
 int doChroot(FileSystemMount *mnt)
 { /*It's too bad ,but now we just do this.*/
    Task *current = getCurrentTask();
-   current->root = mnt->root;
-   if(!current->pwd)
-      current->pwd = mnt->root;
+   current->fs->root = mnt->root;
+   if(!current->fs->pwd)
+      current->fs->pwd = mnt->root;
    return 0;
 }
 
@@ -449,6 +450,58 @@ found:
    dentry->mnt = mnt;
    dentry->type = VFSDentryMount; /*Change type.*/
    unlockSpinLock(&dentry->lock);
+   return 0;
+}
+
+TaskFileSystem *taskForkFileSystem(TaskFileSystem *old,ForkFlags flags)
+{
+   if(flags & ForkShareFileSystem)
+   {
+      if(!old)
+         return old;
+      atomicAdd(&old->ref,1);
+      return old;
+   }
+   TaskFileSystem *new = kmalloc(sizeof(*new));
+   atomicSet(&new->ref,1);
+   if(old)
+   {
+      new->root = old->root;
+      new->pwd = old->pwd;
+       /*We should add the reference count of old->root and old->pwd.*/
+       /*Ignore it now.*/
+   }
+   return new;
+}
+
+int taskExitFileSystem(TaskFileSystem *old)
+{
+   if(atomicAddRet(&old->ref,-1) == 0)
+      kfree(old);
+   return 0;
+}
+
+TaskFiles *taskForkFiles(TaskFiles *old,ForkFlags flags)
+{
+   if(flags & ForkShareFiles)
+   {
+      if(!old)
+         return old;
+      atomicAdd(&old->ref,1);
+      return old;
+   }
+   TaskFiles *new = kmalloc(sizeof(*new));
+   memset(new->fd,0,sizeof(new->fd));
+   atomicSet(&new->ref,1);
+      /*We should copy old->fd to new->fd,ignore it now.*/
+   return new;
+
+}
+
+int taskExitFiles(TaskFiles *old,u8 share)
+{
+   if(atomicAddRet(&old->ref,-1) == 0)
+      kfree(old);
    return 0;
 }
 

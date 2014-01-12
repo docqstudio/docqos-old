@@ -36,7 +36,7 @@ cachedir:
 	      ../include/time/time.h ../include/time/localtime.h ../include/cpu/gdt.h \
 	      ../include/task/task.h ../include/core/list.h ../include/cpu/spinlock.h \
               ../include/cpu/spinlock_types.h ../include/driver/driver.h ../include/driver/pci.h \
-	      ../include/filesystem/virtual.h
+	      ../include/filesystem/virtual.h ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/string.o:lib/string.c ../include/core/const.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
@@ -142,13 +142,13 @@ cachedir:
            ../include/filesystem/virtual.h ../include/core/list.h ../include/memory/kmalloc.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/block.o:filesystem/block.c ../include/core/const.h ../include/memory/kmalloc.h ../include/filesystem/block.h \
-             ../include/filesystem/virtual.h ../include/core/list.h ../include/task/task.h ../include/cpu/spinlock.h \
-	     ../include/cpu/spinlock_types.h ../include/cpu/atomic.h ../include/lib/string.h \
-	     ../include/filesystem/devfs.h
+             ../include/filesystem/virtual.h ../include/core/list.h ../include/task/task.h \
+	     ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/cpu/atomic.h \
+	     ../include/lib/string.h ../include/filesystem/devfs.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/iso9660.o:filesystem/iso9660.c ../include/core/const.h ../include/core/list.h ../include/filesystem/block.h \
-             ../include/filesystem/virtual.h ../include/lib/string.h ../include/task/task.h ../include/cpu/spinlock.h \
-	     ../include/cpu/spinlock_types.h ../include/cpu/atomic.h
+             ../include/filesystem/virtual.h ../include/lib/string.h ../include/task/task.h \
+	     ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/devfs.o:filesystem/devfs.c ../include/core/const.h ../include/core/list.h ../include/filesystem/virtual.h \
              ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
@@ -159,17 +159,17 @@ cachedir:
              ../include/memory/paging.h ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/io.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/systemcall.o:task/systemcall.c ../include/core/const.h ../include/task/task.h ../include/interrupt/interrupt.h \
-                  ../include/filesystem/virtual.h
+                  ../include/filesystem/virtual.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
+		  ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/keyboard.o:input/keyboard.c ../include/core/const.h ../include/interrupt/interrupt.h ../include/cpu/io.h \
-               ../include/video/console.h ../include/task/semaphore.h ../include/task/waitqueue.h \
-	       ../include/task/task.h ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
-	       ../include/cpu/atomic.h
+               ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
+	       ../include/core/list.h ../include/cpu/atomic.h ../include/video/console.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/tty.o:video/tty.c ../include/core/const.h ../include/filesystem/virtual.h ../include/core/list.h \
           ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
 	  ../include/interrupt/interrupt.h ../include/cpu/atomic.h ../include/filesystem/devfs.h \
-	  ../include/video/vesa.h ../include/cpu/io.h ../include/lib/string.h
+	  ../include/video/vesa.h ../include/cpu/io.h ../include/lib/string.h ../include/cpu/atomic.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
