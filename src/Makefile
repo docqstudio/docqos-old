@@ -116,7 +116,7 @@ cachedir:
 	    ../include/memory/buddy.h ../include/cpu/atomic.h ../include/lib/string.h \
 	    ../include/interrupt/interrupt.h ../include/cpu/gdt.h ../include/cpu/spinlock_types.h \
 	    ../include/time/time.h ../include/filesystem/virtual.h ../include/task/elf64.h \
-	    ../include/memory/paging.h
+	    ../include/memory/paging.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/fork.o:task/fork.S
 	$(AS) $(ASFLAGS) -o $@ $<

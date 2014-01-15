@@ -4,5 +4,4 @@
 typedef struct VFSFile VFSFile;
 typedef struct IRQRegisters IRQRegisters;
 
-int elf64Execve(VFSFile *file,const char *argv[],
-   const char *envp[],IRQRegisters *regs);
+int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs);

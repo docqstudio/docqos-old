@@ -5,6 +5,8 @@
 .code64
 
 _start:
+   movq %rcx,%rdi
+   movq %rbx,%rsi
    call main
    movq %rax,%rdi
    call exit

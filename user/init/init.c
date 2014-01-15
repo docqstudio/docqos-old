@@ -30,17 +30,29 @@ int main(void)
    return 0;
 }
 
+const char *getCommandArgument(char **cmd)
+{
+   char *retval = *cmd;
+   char *tmp = *cmd;
+   while(*tmp != ' ' && *tmp != '\0')
+      ++tmp;    /*Skip arguments.*/
+   if(*tmp == '\0')
+      goto out;
+   *tmp++ = '\0'; /*Set end.*/
+   while(*tmp == ' ') /*Skip ' '.*/
+      ++tmp;
+out:
+   *cmd = tmp;
+   return retval;
+}
+
 int shellRunCommand(char *cmd)
 {
    while(*cmd == ' ')
       ++cmd; /*Skip ' '.*/
    if(*cmd == '\0')
       return 0;
-   char *tmp;
-   for(tmp = cmd;*tmp != ' ' && *tmp != '\0';++tmp)
-      ;
-   *tmp = '\0'; /*No support for arguments.*/
-
+   
    int pid = fork();
    int ret = 0;
    if(pid < 0) /*Fail to fork.*/
@@ -48,7 +60,13 @@ int shellRunCommand(char *cmd)
    else if(pid > 0) /*Parent process.*/
       return (waitpid(pid,&ret,0),ret); /*Wait for the child process.*/
    /*Child process.*/
-   execve(cmd,0,0);
+   const char *argv[10];
+   int i = 0;
+   while(*cmd && i + 1 < sizeof(argv) / sizeof(argv[0]))
+      argv[i++] = getCommandArgument(&cmd);
+   argv[i] = 0; /*Set end.*/
+
+   execve(argv[0],argv,0);
    write(stdout,"Bad Command!!!\n",0);
             /*Can't execve?Maybe this is a bad command.*/
    exit(0);

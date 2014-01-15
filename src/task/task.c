@@ -416,6 +416,31 @@ wait:
 
 int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs)
 {
+   u8 arguments[1024];
+   int size = 0,i = 0,pos = 0;
+   if(!argv) /*Are there any arguments?*/
+      goto next;
+   for(i = 0;argv[i];++i) /*Copy arguments to the kernel stack.*/
+   {
+      int len = strlen(argv[i]) + 1; /*The argument's length.*/
+                                    /*Add 1 for '\0'.*/
+      if(pos + len > sizeof(arguments))
+      {    /*If there are too many arguments,just ignore arguments.*/
+         size = i = pos = 0;
+         goto next;
+      }
+      memcpy((void *)&arguments[pos],(const void *)argv[i],len);
+      argv[i] = (const char *)(pointer)pos; /*Set it to the offset.*/
+      pos += len;
+   }
+   size = (i + 1) * sizeof(void *);
+   if(pos + size > sizeof(arguments))
+   {    /*Too many?*/
+      size = i = pos = 0;
+      goto next;
+   }
+   memcpy((void *)&arguments[pos],(const void *)argv,size);
+next:;
    Task *current = getCurrentTask();
    VFSFile *file = openFile(path);
    if(!file)
@@ -425,7 +450,11 @@ int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters
    current->mm = taskForkMemory(0,ForkShareNothing);
    if(!current->mm)
       goto failed;
-   int ret = elf64Execve(file,argv,envp,regs);
+   int ret;
+   if(pos && i && size) /*There are arguments.*/
+      ret = elf64Execve(file,arguments,pos,pos + size,regs);
+   else
+      ret = elf64Execve(file,0,0,0,regs); /*There aren't arguments.*/
    if(ret)
       goto failed;
    closeFile(file);

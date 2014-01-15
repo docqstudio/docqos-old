@@ -5,6 +5,7 @@
 #include <interrupt/interrupt.h>
 #include <cpu/gdt.h>
 #include <cpu/io.h>
+#include <lib/string.h>
 
 /*See also http://downloads.openwatcom.org/ftp/devel/docs/elf-64-gen.pdf.*/
 
@@ -34,7 +35,7 @@ typedef struct ELF64ProgramHeader{
    u64 align;
 } ELF64ProgramHeader;
 
-int elf64Execve(VFSFile *file,const char *argv[],const char *envp[],IRQRegisters *regs)
+int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
 {
    ELF64Header header;
    if(lseekFile(file,0) < 0)
@@ -66,11 +67,22 @@ int elf64Execve(VFSFile *file,const char *argv[],const char *envp[],IRQRegisters
       return -1;
        /*Map the user stack,from 0xffffe000 to 0xffffffff.*/
        /*(4GB - 8K) ~ 4GB.*/
-
+   pointer stackTop = 0xfffffffful;
+   regs->rcx = regs->rbx = 0;
+   if(!arguments) /*Are there arguments?*/
+      goto out;
+   stackTop -= end; /*Put the arguments to the user stack.*/
+   for(int i = pos;i < end - sizeof(void *);i += sizeof(void *))
+      *(pointer *)(&arguments[i]) += stackTop;
+   memcpy((void *)stackTop,(const void *)arguments,end);
+   regs->rcx = (end - pos) / sizeof(void *) - 1;
+   regs->rbx = stackTop + pos;
+    /*User: %rcx => argument count (argc),%rbx => arguments (argv).*/
+out:
    regs->rip = header.entry; /*Set rip,cs,ss,rsp and rflags.*/
    regs->cs = SELECTOR_USER_CODE;
    regs->ss = SELECTOR_USER_DATA;
-   regs->rsp = 0xffffffff;
+   regs->rsp = (u64)stackTop;
    regs->rflags = storeInterrupt(); /*Interrupts should be started.*/
    return 0;
 }
