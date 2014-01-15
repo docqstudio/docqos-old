@@ -24,7 +24,6 @@ typedef enum ForkFlags{
 
 typedef enum TaskState{
    TaskRunning,
-   TaskSleeping,
    TaskStopping,
    TaskZombie
 } TaskState;
@@ -128,7 +127,7 @@ inline int preemptionSchedule(void)
    Task *current = getCurrentTask();
    if(current->preemption)
       return 0;
-   if(current->state == TaskRunning || current->state == TaskSleeping)
+   if(current->state == TaskRunning)
       schedule();
    return 0;
 }

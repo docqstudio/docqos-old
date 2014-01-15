@@ -102,15 +102,15 @@ static int keyboardTestIn(void)
 static int keyboardIRQ(IRQRegisters *reg,void *unused)
 {
    u64 rflags;
-   u8 status,data;
-   lockSpinLockDisableInterrupt(&keyboardLock,&rflags);
-   do{
+   u8 data;
+   lockSpinLockCloseInterrupt(&keyboardLock,&rflags);
+   while(inb(KB_STATUS) & KB_STATUS_DATA){
       data = inb(KB_DATA); /*Get scan code and put it into keyboardBuffer.*/
       keyboardBuffer[keyboardWrite++] = data;
       if(keyboardWrite == sizeof(keyboardBuffer)/sizeof(keyboardBuffer[0]))
          keyboardWrite = 0;
-      status = inb(KB_STATUS);
-   }while(status & KB_STATUS_DATA);
+      inb(KB_STATUS);
+   }
    wakeUpTask(keyboardTask);
    unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
    return 0;
@@ -126,7 +126,7 @@ static int __keyboardTask(void *data)
    {
       u64 rflags;
       u8 i,keypad = 0;
-      lockSpinLockDisableInterrupt(&keyboardLock,&rflags);
+      lockSpinLockCloseInterrupt(&keyboardLock,&rflags);
       if(keyboardRead == keyboardWrite)
       {
          keyboardTask->state = TaskStopping;

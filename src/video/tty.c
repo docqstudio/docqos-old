@@ -38,7 +38,7 @@ static int ttyRead(VFSFile *file,void *buf,u64 size)
       return -1;
    Task *current = getCurrentTask();
    u64 rflags;
-   lockSpinLockDisableInterrupt(&ttyReader.lock,&rflags);
+   lockSpinLockCloseInterrupt(&ttyReader.lock,&rflags);
    if(ttyReader.reader)
       goto failed; /*If there is a reader,failed!*/
    ttyReader.reader = current;
@@ -67,7 +67,7 @@ int ttyKeyboardPress(char i)
 {
    u64 rflags;
    char string[2] = {i,'\0'};
-   lockSpinLockDisableInterrupt(&ttyReader.lock,&rflags);
+   lockSpinLockCloseInterrupt(&ttyReader.lock,&rflags);
    if(!ttyReader.reader) /*If no readers,just goto out.*/
       goto out;
    if(ttyReader.pos == ttyReader.size) /*If the buffer is full,goto out.*/

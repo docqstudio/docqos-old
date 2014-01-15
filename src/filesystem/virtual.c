@@ -71,13 +71,30 @@ static int vfsLookUpClear(VFSDentry *dentry)
       if(atomicAddRet(&dentry->ref,-1) == 0)
       { /*If reference count is zero,destory it.*/
          listDelete(&dentry->list);
+         unlockSpinLock(&parent->lock);
          destoryDentry(dentry);
+         dentry = parent;
+         continue;
       }
       unlockSpinLock(&parent->lock);
       dentry = parent;
    }
    atomicAdd(&dentry->ref,-1); /*It should never be 0.*/
    return 0;
+}
+
+static VFSDentry *vfsLookUpDentry(VFSDentry *dentry)
+{
+   VFSDentry *child = dentry,*parent;
+   while((parent = child->parent))
+   {
+      lockSpinLock(&parent->lock);
+      atomicAdd(&child->ref,1);
+      unlockSpinLock(&parent->lock);
+      child = parent;
+   }
+   atomicAdd(&child->ref,1);
+   return dentry;
 }
 
 static VFSDentry *vfsLookUp(const char *__path)
@@ -94,17 +111,7 @@ static VFSDentry *vfsLookUp(const char *__path)
       ret = getCurrentTask()->fs->root;
    else
       ret = getCurrentTask()->fs->pwd;
-   {
-      VFSDentry *parent,*child = ret;
-      while((parent = child->parent))
-      {
-         lockSpinLock(&parent->lock);
-         atomicAdd(&child->ref,1);
-         unlockSpinLock(&parent->lock);
-         child = parent;
-      }
-      atomicAdd(&child->ref,1);
-   } /*Add reference count.*/
+   ret = vfsLookUpDentry(ret);
    for(;;)
    {
       while(*path == '/')
@@ -118,6 +125,25 @@ static VFSDentry *vfsLookUp(const char *__path)
          break; /*If last,break.*/
       *next = '\0'; /*It will be restored soon.*/
       int pathLength = strlen(path);
+      if(path[0] == '.' && path[1] == '\0')
+         goto next;
+      if(path[0] == '.' && path[1] == '.' && path[2] == '\0')
+      {
+         if(!ret->parent)
+            goto next;
+         VFSDentry *parent = ret->parent;
+         lockSpinLock(&parent->lock);
+         if(atomicAddRet(&ret->ref,-1) == 0)
+         {
+            listDelete(&ret->list);
+            unlockSpinLock(&parent->lock);
+            destoryDentry(ret);
+            ret = parent;
+            goto next;
+         }
+         ret = parent;
+         goto next;
+      }
       lockSpinLock(&ret->lock);
       for(ListHead *list = ret->children.next;list != &ret->children;list = list->next)
       {
@@ -464,20 +490,23 @@ TaskFileSystem *taskForkFileSystem(TaskFileSystem *old,ForkFlags flags)
    }
    TaskFileSystem *new = kmalloc(sizeof(*new));
    atomicSet(&new->ref,1);
-   if(old)
-   {
-      new->root = old->root;
-      new->pwd = old->pwd;
-       /*We should add the reference count of old->root and old->pwd.*/
-       /*Ignore it now.*/
-   }
+   if(old && old->root)
+      new->root = vfsLookUpDentry(old->root); /*Add old->root's reference count.*/
+   if(old && old->pwd)
+      new->pwd = vfsLookUpDentry(old->pwd); /*Add old->pwd's reference count.*/
    return new;
 }
 
 int taskExitFileSystem(TaskFileSystem *old)
 {
    if(atomicAddRet(&old->ref,-1) == 0)
+   {      /*If old's reference count is zero,free it.*/
+      if(old->root)
+         vfsLookUpClear(old->root);
+      if(old->pwd)
+         vfsLookUpClear(old->pwd);
       kfree(old);
+   }
    return 0;
 }
 
@@ -491,17 +520,39 @@ TaskFiles *taskForkFiles(TaskFiles *old,ForkFlags flags)
       return old;
    }
    TaskFiles *new = kmalloc(sizeof(*new));
+   if(unlikely(!new))
+      return new;
    memset(new->fd,0,sizeof(new->fd));
    atomicSet(&new->ref,1);
-      /*We should copy old->fd to new->fd,ignore it now.*/
+   if(!old)
+      goto out;
+   for(int i = 0;i < sizeof(old->fd)/sizeof(old->fd[0]);++i)
+   {
+      if(old->fd[i])
+      { /*Copy file descriptors.*/
+         VFSFile *file = kmalloc(sizeof(*file));
+         if(unlikely(!file))
+            continue;
+         file->seek = old->fd[i]->seek;
+         file->operation = old->fd[i]->operation;
+         file->dentry = vfsLookUpDentry(old->fd[i]->dentry);
+                               /*Add old->fd[i]->dentry's reference count.*/
+         new->fd[i] = file;
+      }
+   }
+out:
    return new;
-
 }
 
 int taskExitFiles(TaskFiles *old,u8 share)
 {
    if(atomicAddRet(&old->ref,-1) == 0)
+   {
+      for(int i = 0;i < sizeof(old->fd) / sizeof(old->fd[0]);++i)
+         if(old->fd[i])
+            closeFile(old->fd[i]); /*Close files which are opened.*/
       kfree(old);
+   }
    return 0;
 }
 

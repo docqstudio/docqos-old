@@ -3,7 +3,7 @@
 #include <cpu/spinlock_types.h>
 #include <task/task.h>
 
-#define lockSpinLockDisableInterrupt(lock,rflags) \
+#define lockSpinLockCloseInterrupt(lock,rflags) \
   do{ \
      *(rflags) = storeInterrupt(); \
      closeInterrupt();\
@@ -16,7 +16,7 @@
       restoreInterrupt(*(rflags)); \
    }while(0)
 
-#define unlockSpinLockEnableInterrupt(lock) \
+#define unlockSpinLockStartInterrupt(lock) \
    do{ \
       unlockSpinLock(lock); \
       startInterrupt(); \

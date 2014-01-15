@@ -157,6 +157,8 @@ static void *copyPTE(void *pde,int nr,
       if(!(pte[i] & 0x1)) /*Exist?*/
          continue;
       void *n = (*pteCopier)(pa2va(pte[i] & ~(0x1000 - 1)));
+      if(!n)
+         return 0;
       setPTE(new,(pointer)i << 12,va2pa(n));
    }
    return new;
@@ -171,7 +173,9 @@ static void *copyPDE(void *pdpte,int nr,
    {
       if(!(pde[i] & 0x1)) /*Exist?*/
          continue;
-      copyPTE(new,i,pa2va(pde[i] & ~(0x1000 - 1)),pteCopier);
+      void *n = copyPTE(new,i,pa2va(pde[i] & ~(0x1000 - 1)),pteCopier);
+      if(!n)
+         return 0;
    }
    return new;
 }
@@ -185,18 +189,32 @@ static void *copyPDPTE(void *pml4e,int nr,
    {
       if(!(pdpte[i] & 0x1)) /*Exist?*/
          continue;
-      copyPDE(new,i,pa2va(pdpte[i] & ~(0x1000 - 1)),pteCopier);
+      void *n = copyPDE(new,i,pa2va(pdpte[i] & ~(0x1000 - 1)),pteCopier);
+      if(!n)
+         return 0; /*Returning zero is OK.*/
+         /*Because new has been set in pml4e since we called allocPDPTE.*/
+         /*And pml4e will be destoried soon!!!!*/
    }
    return new;
 }
 
-static void *copyPML4E(void *__pml4e,void *(*pteCopier)(void *data))
+static void *copyPML4E(void *__pml4e,void *(*pteCopier)(void *data),u8 *failed)
 {
    u64 *pml4e = (u64 *)__pml4e;
    void *new = allocPML4E();
+   if(!new || !pml4e) /*If pml4e is nullptr,just return allocPML4E().*/
+      return new;
    if(!(pml4e[0] & 0x1))
       return new;
-   copyPDPTE(new,0,pa2va(pml4e[0] & ~(0x1000 - 1)),pteCopier);
+   void *n = copyPDPTE(new,0,pa2va(pml4e[0] & ~(0x1000 - 1)),pteCopier);
+   if(!n)
+   {
+      if(failed)
+         *failed = 1;
+      return new;
+   }
+   if(failed)
+      *failed = 0;
       /*pml4e[0]:user page tables*/
       /*pml4e[1]:kernel page tables,always kernelPDPTEDir*/
       /*pml4e[2] ~ pml4e[511]:unused*/
@@ -289,13 +307,7 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
    Task *current = getCurrentTask();
    void *pml4e;
    PhysicsPage *page = 0;
-   if(current->mm)
-      pml4e = current->mm->page;
-   else{
-      pml4e = allocPML4E();
-      current->mm = taskForkMemory(0,ForkShareNothing);
-      current->mm->page = pml4e;
-   }
+   pml4e = current->mm->page;
    len = (len + 0xfff) & ~0xfff;
    address &= ~0xfff;
    if(address + len < address || address + len > PAGE_OFFSET)
@@ -338,11 +350,9 @@ failed:
 
 int taskSwitchMemory(TaskMemory *old,TaskMemory *new)
 {
-   if(!new)
+   if(!new || !new->page)
       return 0;
    if(old && (new->page == old->page))
-      return 0;
-   if(!new->page)
       return 0;
    asm volatile("movq %%rax,%%cr3"::"a"(va2pa(new->page)));
                  /*Switch %cr3.*/
@@ -364,8 +374,16 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
    atomicSet(&new->ref,1);
    new->page = 0;
    new->wait = 0;
-   if(old)
-      new->page = copyPML4E(old->page,&mmapPTECopier);
+   
+   u8 failed = 0;
+   new->page = copyPML4E(old ? old->page : 0,&mmapPTECopier,&failed);
+   if(failed || !new->page) /*If failed,return zero.*/
+   {
+      if(new->page)
+         freePML4E(new->page,&mmapPTEFreer);
+      kfree(new);
+      return 0;
+   }
    return new;
 }
 

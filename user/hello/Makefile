@@ -1,20 +1,16 @@
 ROOT=../..
 include $(ROOT)/Makefile.config
-
-OBJS=.obj/cinit.o
-TARGET=$(ROOT)/bin/sbin/init
+TARGET=$(ROOT)/bin/hello
+OBJS=.obj/hello.o
 
 first:cachedir $(TARGET)
 
 cachedir:
 	mkdir -p .obj
-
-.obj/cinit.o:init.c ../include/unistd.h
+.obj/hello.o:hello.c ../include/unistd.h
 	$(CC) $(CFLAGS_USER) -o $@ $<
-
 $(TARGET):$(OBJS)
-	mkdir -p $(ROOT)/sbin
-	$(LD) $(LDFLAGS_USER) -o $@ $(OBJS)
+	$(LD) $(LDFLAGS_USER) -o $(TARGET) $(OBJS)
 
 clean:
 	$(RM) .obj

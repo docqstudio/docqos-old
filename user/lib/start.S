@@ -1,9 +1,11 @@
 .section ".text","ax"
-.code64
+.extern exit
 .extern main
 .global _start
+.code64
 
 _start:
    call main
-0:
-   jmp 0b /*End-less loop.*/
+   movq %rax,%rdi
+   call exit
+   ud2

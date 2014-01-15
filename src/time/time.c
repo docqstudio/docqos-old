@@ -19,7 +19,7 @@ static int timeInterrupt(IRQRegisters *reg,void *data)
    ++ticks;
 
    for(;;){
-      lockSpinLockDisableInterrupt(&timerLock,&rflags);
+      lockSpinLockCloseInterrupt(&timerLock,&rflags);
 
       if(listEmpty(&timers))
          break; /*Just break if empty.*/
@@ -79,7 +79,7 @@ Timer *createTimer(TimerCallBackFunction callback,int timeout,void *data)
 int addTimer(Timer *timer)
 {
    u64 rflags;
-   lockSpinLockDisableInterrupt(&timerLock,&rflags);
+   lockSpinLockCloseInterrupt(&timerLock,&rflags);
 
    for(ListHead *list = timers.next;list != &timers;list = list->next)
    {
@@ -100,7 +100,7 @@ end:
 int removeTimer(Timer *timer)
 {
    u64 rflags;
-   lockSpinLockDisableInterrupt(&timerLock,&rflags);
+   lockSpinLockCloseInterrupt(&timerLock,&rflags);
 
    listDelete(&timer->list); 
       /*A list can be deleted more than one times.*/

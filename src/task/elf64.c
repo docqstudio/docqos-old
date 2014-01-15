@@ -60,8 +60,10 @@ int elf64Execve(VFSFile *file,const char *argv[],const char *envp[],IRQRegisters
       return -1;
 
    for(int i = 0;i < sizeof(phdrs) / sizeof(phdrs[0]);++i)
-      doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz);
-   doMMap(0,0,0xffffe000,0x2000);
+      if(doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz))
+         return -1;
+   if(doMMap(0,0,0xffffe000,0x2000))
+      return -1;
        /*Map the user stack,from 0xffffe000 to 0xffffffff.*/
        /*(4GB - 8K) ~ 4GB.*/
 

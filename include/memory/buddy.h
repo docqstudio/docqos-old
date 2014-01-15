@@ -2,6 +2,8 @@
 #include <core/list.h>
 #include <memory/paging.h>
 
+#define PHYSICS_PAGE_SIZE    0x1000
+
 typedef enum PhysicsPageFlags{
    PageReserved = (1 << 0),
    PageData     = (1 << 1),
@@ -25,6 +27,7 @@ int initBuddySystem(void);
 
 int freePages(PhysicsPage *page,unsigned int order);
 PhysicsPage *allocPages(unsigned int order);
+PhysicsPage *allocAlignedPages(unsigned int order);
 
 u64 getPhysicsPageCount(void);
 PhysicsPage *getMemoryMap(void);

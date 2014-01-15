@@ -125,6 +125,40 @@ PhysicsPage *allocPages(unsigned int order)
    }
    return 0;
 }
+
+PhysicsPage *allocAlignedPages(unsigned int order)
+{
+   unsigned int currentOrder = order;
+   u64 size;
+   PhysicsPage *page,*buddy;
+   u64 align = (PHYSICS_PAGE_SIZE << order) - 1;
+   for(;currentOrder < MAX_ORDER;++currentOrder)
+   {
+      for(ListHead *list = freeList[currentOrder].next;list != &freeList[currentOrder];list = list->next)
+      {
+         page = listEntry(list,PhysicsPage,list);
+         if(((u64)getPhysicsPageAddress(page) & align) != 0x0)
+            continue;
+         ++page->count;
+         page->flags &= ~PageData;
+         page->data = 0;
+         listDelete(&page->list);
+         size = 1ul << currentOrder;
+         while(currentOrder > order)
+         {
+            --currentOrder;
+            size >>= 1;
+            buddy = page + size;
+            listAddTail(&buddy->list,&freeList[currentOrder]);
+            buddy->flags |= PageData;
+            buddy->data = currentOrder;
+         } /*Split the page.*/
+         return page;
+      }
+   }
+   return 0;
+}
+
 PhysicsPage *getMemoryMap(void)
 {
    return memoryMap;
