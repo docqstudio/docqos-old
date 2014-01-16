@@ -39,7 +39,7 @@ static int doInitcalls(void)
 int kinit(void)
 {
    doInitcalls();
-   char *buf[20] = {};
+   char buf[25] = {};
    printk("\nTry to open file 'test1.c'.\n");
    int fd = doOpen("test1.c");
    if(fd < 0)

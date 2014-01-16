@@ -8,6 +8,7 @@
 #define __NR_fork 0x5
 #define __NR_exit  0x6
 #define __NR_waitpid 0x7
+#define __NR_reboot 0x8
 
 #define __syscall0(ret,name)  \
    ret name(void) \
@@ -50,6 +51,7 @@ __syscall0(int,fork);
 __syscall1(int,exit,int,code);
 __syscall1(int,open,const char *,filename);
 __syscall1(int,close,int,fd);
+__syscall1(int,reboot,unsigned long,command);
 __syscall3(int,execve,const char *,path,const char **,argc,const char **,envp);
 __syscall3(int,read,int,fd,void *,buf,unsigned long,size);
 __syscall3(int,write,int,fd,const void *,buf,unsigned long,size);

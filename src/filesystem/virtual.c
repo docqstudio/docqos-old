@@ -5,7 +5,7 @@
 #include <task/task.h>
 #include <lib/string.h>
 
-ListHead fileSystems; 
+static ListHead fileSystems; 
 /*A list of file systems which has registered.*/
 
 static int initVFS(void)
@@ -490,6 +490,7 @@ TaskFileSystem *taskForkFileSystem(TaskFileSystem *old,ForkFlags flags)
    }
    TaskFileSystem *new = kmalloc(sizeof(*new));
    atomicSet(&new->ref,1);
+   new->root = new->pwd = 0;
    if(old && old->root)
       new->root = vfsLookUpDentry(old->root); /*Add old->root's reference count.*/
    if(old && old->pwd)

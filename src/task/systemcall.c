@@ -2,6 +2,10 @@
 #include <interrupt/interrupt.h>
 #include <task/task.h>
 #include <filesystem/virtual.h>
+#include <acpi/power.h>
+
+#define REBOOT_MAGIC_CMD    0xacde147525474417ul
+#define POWEROFF_MAGIC_CMD  0x1234aeda78965421ul
 
 typedef u64 (*SystemCallHandler)(IRQRegisters *reg);
 
@@ -13,16 +17,18 @@ static u64 systemClose(IRQRegisters *reg);
 static u64 systemFork(IRQRegisters *reg);
 static u64 systemExit(IRQRegisters *reg);
 static u64 systemWaitPID(IRQRegisters *reg);
+static u64 systemReboot(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
-   systemExecve,
+   systemExecve, /*0*/
    systemOpen,
    systemRead,
    systemWrite,
    systemClose,
-   systemFork,
+   systemFork,  /*5*/
    systemExit,
-   systemWaitPID
+   systemWaitPID,
+   systemReboot
 };
 
 static u64 systemOpen(IRQRegisters *reg)
@@ -67,6 +73,22 @@ static u64 systemWaitPID(IRQRegisters *reg)
 static u64 systemExit(IRQRegisters *reg)
 {
    return doExit((int)reg->rbx);
+}
+
+static u64 systemReboot(IRQRegisters *reg)
+{
+   switch(reg->rbx)
+   {
+   case REBOOT_MAGIC_CMD:
+      doReboot();
+      break;
+   case POWEROFF_MAGIC_CMD:
+      doPowerOff();
+      break;
+   default:
+      break;
+   }
+   return -1;
 }
 
 int doSystemCall(IRQRegisters *reg)

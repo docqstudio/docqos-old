@@ -5,8 +5,8 @@
 #include <memory/kmalloc.h>
 #include <lib/string.h>
 
-ListHead parts;
-ListHead blockDevices;
+static ListHead parts;
+static ListHead blockDevices;
 
 static int initBlockDevice(void)
 {

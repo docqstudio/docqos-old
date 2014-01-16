@@ -58,6 +58,8 @@ failed:
 
 static int initTTY(void)
 {
+   ttyReader.reader = 0;
+   ttyReader.pos = ttyReader.size = 0;
    initSpinLock(&ttyReader.lock);
    return devfsRegisterDevice(&ttyFileOperation,"tty");
       /*Register "/dev/tty" file.*/

@@ -1,5 +1,6 @@
 #include <core/const.h>
 #include <lib/string.h>
+#include <acpi/power.h>
 #include <acpi/acpi.h>
 #include <memory/paging.h>
 #include <video/console.h>
@@ -73,7 +74,6 @@ static u8 *localApicAddress = 0;
 static u8 *ioApicAddress = 0;
 static u8 *hpetAddress = 0;
 
-
 static int parseApic(ACPIHeaderApic *apic)
 {
    char temp[20];
@@ -146,6 +146,10 @@ static int parseDT(ACPIHeader *dt)
       parseApic((ACPIHeaderApic *)dt);
    else if(signature == *(u32 *)"HPET")
       parseHpet((ACPIHeaderHpet *)dt);
+   else if(signature == *(u32 *)"FACP")
+      acpiEnable(dt,0);
+   else if(signature == *(u32 *)"SSDT")
+      acpiEnable(0,dt);
    return 0;
 }
 

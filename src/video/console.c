@@ -74,7 +74,10 @@ char *vsprintk(char *buf,const char *string,VarArgsList list)
             memcpy((void *)buf,(const void *)s,len);
             buf += len;
             break;
-         } 
+         }
+      case 'c':
+         *(buf++) = varArgsNext(list,int);
+         break;
       default:
          break;
       }

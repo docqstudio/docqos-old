@@ -10,7 +10,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
    .obj/pci.o .obj/ide.o .obj/semaphore.o .obj/vfs.o .obj/block.o \
    .obj/iso9660.o .obj/devfs.o .obj/elf64.o .obj/systemcall.o .obj/keyboard.o \
-   .obj/tty.o
+   .obj/tty.o .obj/power.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -71,7 +71,7 @@ cachedir:
 		  ../include/interrupt/localapic.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/acpi.o:acpi/acpi.c ../include/core/const.h ../include/video/console.h ../include/acpi/acpi.h \
-            ../include/memory/paging.h
+            ../include/memory/paging.h ../include/acpi/power.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/localapic.o:interrupt/localapic.c ../include/core/const.h ../include/acpi/acpi.h \
                  ../include/cpu/cpuid.h ../include/video/console.h ../include/interrupt/idt.h \
@@ -160,7 +160,7 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/systemcall.o:task/systemcall.c ../include/core/const.h ../include/task/task.h ../include/interrupt/interrupt.h \
                   ../include/filesystem/virtual.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
-		  ../include/cpu/atomic.h
+		  ../include/cpu/atomic.h ../include/acpi/power.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/keyboard.o:input/keyboard.c ../include/core/const.h ../include/interrupt/interrupt.h ../include/cpu/io.h \
                ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
@@ -170,6 +170,9 @@ cachedir:
           ../include/cpu/spinlock.h ../include/cpu/spinlock_types.h ../include/task/task.h \
 	  ../include/interrupt/interrupt.h ../include/cpu/atomic.h ../include/filesystem/devfs.h \
 	  ../include/video/vesa.h ../include/cpu/io.h ../include/lib/string.h ../include/cpu/atomic.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/power.o:acpi/power.c ../include/core/const.h ../include/acpi/power.h ../include/video/console.h \
+             ../include/cpu/io.h ../include/memory/paging.h ../include/interrupt/interrupt.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds

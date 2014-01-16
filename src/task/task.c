@@ -363,7 +363,7 @@ int doExit(int n)
    if(current->parent->waiting)
       wakeUpTask(current->parent); /*If parent is waiting,wake up.*/
    unlockSpinLock(&taskLock); 
-   
+
    schedule();
 
    for(;;);

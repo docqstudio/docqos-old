@@ -80,9 +80,14 @@ int shell(void)
    {    /*Print "losthost / $ ".*/
       write(stdout,"\xffs\xff\x00\x00losthost \xffs\x00\x00\xff/ $ ",0);
       read(stdin,(void *)cmd,sizeof(cmd) - 3);
-      if(cmd[0] == 'e' && cmd[1] == 'x' && cmd[2] == 'i' &&
-         cmd[3] == 't' && cmd[4] == '\0') /*Exit command.*/
-         break;
+      if(cmd[0] == 'r' && cmd[1] == 'e' && cmd[2] == 'b' &&
+         cmd[3] == 'o' && cmd[4] == 'o' && cmd[5] == 't' &&
+         cmd[6] == '\0') /*Exit command.*/
+         reboot(REBOOT_REBOOT_COMMAND);
+      if(cmd[0] == 's' && cmd[1] == 'h' && cmd[2] == 'u' &&
+         cmd[3] == 't' && cmd[4] == 'd' && cmd[5] == 'o' &&
+         cmd[6] == 'w' && cmd[7] == 'n' && cmd[8] == '\0') /*Exit command.*/
+         reboot(REBOOT_POWEROFF_COMMAND);
       shellRunCommand((char *)cmd); /*Try to run this command.*/
    }
    write(stdout,"Goodbye!\n",0);
