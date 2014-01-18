@@ -28,6 +28,7 @@ int initBuddySystem(void);
 int freePages(PhysicsPage *page,unsigned int order);
 PhysicsPage *allocPages(unsigned int order);
 PhysicsPage *allocAlignedPages(unsigned int order);
+PhysicsPage *allocDMAPages(unsigned int order,unsigned int max);
 
 u64 getPhysicsPageCount(void);
 PhysicsPage *getMemoryMap(void);

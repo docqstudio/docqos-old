@@ -72,6 +72,14 @@ static int acpiPowerIRQ(IRQRegisters *reg,void *data)
       outw(acpiFadt->eventRegister1a,1 << 8); /*Clear this bit!*/
       doPowerOff();
    }
+   if(!acpiFadt->eventRegister1b)
+      return 0;
+   status = inw(acpiFadt->eventRegister1b);
+   if(status & (1 << 8))
+   {
+      outw(acpiFadt->eventRegister1b,1 << 8); /*Clear this bit.*/
+      doPowerOff();
+   }
    return 0;
 }
 
@@ -141,7 +149,7 @@ retry:;
    {
       if(!acpiSsdt)
          for(;;);
-      if(dt == acpiSsdt)
+      if(dt == acpiSsdt) 
          for(;;);
       dt = acpiSsdt;
       goto retry;  

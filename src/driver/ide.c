@@ -8,6 +8,7 @@
 #include <task/task.h>
 #include <task/semaphore.h>
 #include <filesystem/block.h>
+#include <memory/buddy.h>
 
 typedef enum IDEDeviceType{
    InvalidIDEDevice,
@@ -30,6 +31,8 @@ typedef struct IDEDevice{
    IDEDeviceType type;
    IDEDeviceSubType subType;
 
+   PhysicsPage *prdt;
+   u8 dma;
    u8 primary,master;
    /*Primary is if this device is primary.*/
    /*Master is if this device is master.*/
@@ -40,6 +43,7 @@ typedef struct IDEInterruptWait{
    u8 primary;
    Task *task;
    u8 status;
+   u8 bmstatus;
 } IDEInterruptWait;
 
 /*IDE in PCI.*/
@@ -61,6 +65,7 @@ typedef struct IDEInterruptWait{
 #define IDE_REG_COMMAND              0x07
 #define IDE_REG_BMCOMMAND            0x08
 #define IDE_REG_BMSTATUS             0x0a
+#define IDE_REG_BMPRDT               0x0c
 #define IDE_REG_CONTROL              0xff
 
 /*ATA commands.*/
@@ -69,6 +74,11 @@ typedef struct IDEInterruptWait{
 /*ATAPI commands.*/
 #define IDE_CMD_PACKET               0xa0
 #define IDE_CMD_IDENTIFY_PACKET      0xa1
+
+/*BM commands.*/
+#define IDE_BMCMD_START              0x01
+#define IDE_BMCMD_READ               0x08
+#define IDE_BMCMD_WRITE              0x00
 
 /*IDE cntrol register.*/
 #define IDE_DISABLE_IRQ              0x02
@@ -86,7 +96,9 @@ typedef struct IDEInterruptWait{
 #define IDE_SECONDARY_IRQ            15
 
 /*Bus Master IDE status register.*/
-#define IDE_BMSTATUS_INTERRUPT       0x4
+#define IDE_BMSTATUS_INTERRUPT       0x04
+#define IDE_BMSTATUS_ERROR           0x02
+#define IDE_BMSTATUS_ACTIVE          0x01
 
 static int ideDisable(Device *device);
 static int ideProbe(Device *device);
@@ -99,6 +111,7 @@ static int ideIRQSecondary(IRQRegisters *reg,void *data);
 static inline int ideOutb(u8 device,u8 reg,u8 data) __attribute__ ((always_inline));
 static inline int ideOutl(u8 device,u8 reg,u32 data) __attribute__ ((always_inline));
 static inline u8 ideInb(u8 device,u8 reg) __attribute__ ((always_inline));
+static inline u32 ideInl(u8 device,u8 reg) __attribute__ ((always_inline));
 static inline int ideInsl(u8 device,u8 reg,u64 size,void *buf) 
    __attribute__ ((always_inline));
 static inline int ideInsw(u8 device,u8 reg,u64 size,void *buf) 
@@ -111,8 +124,6 @@ static IDEPort ports[2] = {{0},{0}};
 static Semaphore ideSemaphores[2] = {};
 
 static IDEDevice ideDevices[2][2] = {{{0},{0}},{{0},{0}}};
-
-static u8 ideIOBuffer[2048] = {0};
 
 static Driver ideDriver = {
    .probe = &ideProbe,
@@ -179,6 +190,21 @@ static inline u8 ideInb(u8 device,u8 reg)
    return ret;
 }
 
+static inline u32 ideInl(u8 device,u8 reg)
+{
+   IDEPort *port = &ports[device];
+   u32 ret;
+
+   if(reg < 0x08)
+      ret = inl(port->base + reg);
+   else if(reg < 0x10)
+      ret = inl(port->busMasterIDE + reg - 0x08);
+   else
+      ret = inl(port->ctrl);
+
+   return ret;
+}
+
 static inline int ideInsl(u8 device,u8 reg,u64 size,void *buf)
 {
    IDEPort *port = &ports[device];
@@ -218,7 +244,7 @@ static int ideWaitReady(u8 device)
       schedule();
    }
 
-   return 0;
+   return status & IDE_STATUS_ERROR;
 }
 
 static int ideWaitDRQ(u8 device)
@@ -239,89 +265,141 @@ static int ideWaitDRQ(u8 device)
    return error;
 }
 
-static int ideWaitInterrupt(IDEInterruptWait *wait,IDEDevice *device)
-{ /*When we called this function,preemption is disabled.*/
-   u8 irq = 
-      (device->primary == IDE_PRIMARY) ? IDE_PRIMARY_IRQ : IDE_SECONDARY_IRQ;
-         /*IRQ vector of device.*/
-   Task *current = getCurrentTask();
-   wait->task = current;
-   wait->primary = device->primary; /*Init wait.*/
-   current->state = TaskStopping;
-   setIRQData(irq,(void *)wait); /*Stop current task and set IRQ data.*/
-   return 0;
-}
-
-static int ideWaitInterruptEnd(IDEDevice *device)
-{
-   u8 irq = 
-      (device->primary == IDE_PRIMARY) ? IDE_PRIMARY_IRQ : IDE_SECONDARY_IRQ;
-   setIRQData(irq,0);
-   return 0;
-}
-
 static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
-                                 u16 cmdSize,u16 transSize,void *buf)
+                                 u16 cmdSize,u16 transSize,void *buf,u8 dma)
 {
-   IDEInterruptWait wait;
+   int sizeRead = transSize;
+   Task *current = getCurrentTask();
    const u8 primary = device->primary;
    const u8 master = device->master;
-   const u8 poll = getCurrentTask()->preemption > 0;
-      /*If preemption is disabled,we will poll.*/
+   IDEInterruptWait wait = {.task = current,.primary = primary};
+   u8 irq = 
+      (primary == IDE_PRIMARY) ? IDE_PRIMARY_IRQ : IDE_SECONDARY_IRQ;
 
+   dma &= device->dma;
+   
    downSemaphore(&ideSemaphores[primary]);
-   disablePreemption();
+
+   /*Setup DMA.*/
+   ideOutb(primary,IDE_REG_CONTROL,IDE_ENABLE_IRQ);
+   if(dma)
+   {
+      u64 *prdt = getPhysicsPageAddress(device->prdt);
+      pointer address = va2pa(buf);
+      u64 data = (u32)address;
+      data |= ((u64)transSize) << 32;
+      data |= 0x8000000000000000ul;
+      *prdt = data; /*Set the PRD Table.*/
+
+      address = va2pa(prdt); /*Get the physics address of PRDT.*/
+      ideOutb(primary,IDE_REG_BMCOMMAND,0); /*Stop!*/
+      ideOutb(primary,IDE_REG_BMSTATUS,ideInb(primary,IDE_REG_BMSTATUS)); 
+               /*Clear all bits of the Status Register.*/
+      ideOutl(primary,IDE_REG_BMPRDT,address); /*Set the PRDT Register.*/
+      ideOutb(primary,IDE_REG_BMCOMMAND,IDE_BMCMD_READ); 
+      ideOutb(primary,IDE_REG_BMCOMMAND,IDE_BMCMD_START | IDE_BMCMD_READ);
+                /*Start the DMA transfer.*/
+  }
+
    ideWaitReady(primary);
-   ideOutb(primary,IDE_REG_DEV_SEL,master << 4);
-   for(int i = 0;i < 4;++i)
-      ideInb(primary,IDE_REG_CONTROL);
-   ideOutb(primary,IDE_REG_CONTROL,poll ? IDE_ENABLE_IRQ : IDE_DISABLE_IRQ);
-      /*Disable IRQs if we need poll.*/
-   ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
-   ideOutb(primary,IDE_REG_LBA1,(transSize & 0xff));
-   ideOutb(primary,IDE_REG_LBA2,(transSize >> 8) & 0xff);
+   ideOutb(primary,IDE_REG_DEV_SEL,(master << 4) | 0xa0);
+   ideWaitReady(primary);
+   if(!dma)
+   {
+      ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
+      ideOutb(primary,IDE_REG_LBA1,(transSize & 0xff));
+      ideOutb(primary,IDE_REG_LBA2,(transSize >> 8) & 0xff);
+   }else{
+      ideOutb(primary,IDE_REG_FEATURES,0x1); /*DMA Mode.*/
+      ideOutb(primary,IDE_REG_LBA1,0);
+      ideOutb(primary,IDE_REG_LBA2,0);
+   }
    ideOutb(primary,IDE_REG_COMMAND,IDE_CMD_PACKET);/*Send command.*/
 
    if(ideWaitDRQ(primary))
       goto failed;
-   if(!poll)
-   {
-      ideWaitInterrupt(&wait,device);
-      ideOutsw(primary,IDE_REG_DATA,cmdSize / 2,cmd);
-      schedule(); /*Wait Interrupt.*/
-      ideWaitInterruptEnd(device);
-   }else
-      ideOutsw(primary,IDE_REG_DATA,cmdSize / 2,cmd);
+
+   current->state = TaskStopping;
+   setIRQData(irq,&wait);
+   ideOutsw(primary,IDE_REG_DATA,cmdSize / 2,cmd);
+   schedule(); /*Wait Interrupt.*/
+   setIRQData(irq,0);
+
+   if(dma && (wait.bmstatus & IDE_BMSTATUS_ERROR))
+      goto failed;  /*Error!*/
+   else if(dma && (wait.bmstatus & IDE_BMSTATUS_ACTIVE))
+      goto failed; /*Eorror!*/
+   else if(dma)
+      goto out; /*DMA transfer done.*/
 
    if(ideWaitDRQ(primary))
       goto failed;
-   int sizeRead = ideInb(primary,IDE_REG_LBA1);
+   sizeRead = ideInb(primary,IDE_REG_LBA1);
    sizeRead |= ideInb(primary,IDE_REG_LBA2) << 8;
 
-   if(!poll)
-   {
-      ideWaitInterrupt(&wait,device);
+   current->state = TaskStopping;
+   setIRQData(irq,&wait);
+   if(buf)
       ideInsl(primary,IDE_REG_DATA,sizeRead / 4,buf);
-      schedule();
-      ideWaitInterruptEnd(device);
-   }else
-      ideInsl(primary,IDE_REG_DATA,sizeRead / 4,buf);
-      
-   enablePreemption();
+   else
+      while((sizeRead -= 4) >= 0)
+         ideInl(primary,IDE_REG_DATA);
+   schedule();
+   setIRQData(irq,&wait);
+
+out:
    upSemaphore(&ideSemaphores[primary]);
    return (sizeRead == transSize) ? 0 : -1;
       /*Failed if sizeRead != transSize.*/
 failed:
-   enablePreemption();
    upSemaphore(&ideSemaphores[primary]);
    return -1;
+}
+
+static int ideGetDMASupportATAPI(IDEDevice *device)
+{
+   u8 cmd[12] = {0xa8,0,0,0,0,0,0,0,0,1,0,0};
+   u8 *buf = (u8 *)allocDMAPages(0,32); /*Alloc a DMA buffer.*/
+   if(!buf)
+      return -1;
+   buf = (u8 *)getPhysicsPageAddress((PhysicsPage *)buf);
+   memset(buf,0x11,ATAPI_SECTOR_SIZE);
+   u8 retval;
+
+   device->dma = 1;
+   for(;;)
+   {
+      retval =
+         ideSendCommandATAPI(device,cmd,sizeof(cmd),ATAPI_SECTOR_SIZE,buf,1); 
+      if(retval && (device->dma = 0,1)) /*Try to read data using DMA.*/
+         goto out;
+      for(int i = 0;i < ATAPI_SECTOR_SIZE;i += sizeof(u64))
+         if(*(u64 *)&buf[i] != 0x1111111111111111ul)
+            goto out; /*If the buffer is changed,DMA is supported.*/
+      retval = 
+         ideSendCommandATAPI(device,cmd,sizeof(cmd),ATAPI_SECTOR_SIZE,buf,0); 
+                                         /*Try to read data using PIO.*/
+      if(retval && (device->dma = 0,1))
+         goto out;
+      for(int i = 0;i < ATAPI_SECTOR_SIZE;i += sizeof(u64))
+         if((*(u64 *)&buf[i] != 0x1111111111111111ul) && (device->dma = 0,1))
+            goto out; /*If the buffer is changed,DMA is not supported.*/
+      if(++cmd[5] == 0)
+         if(++cmd[4] == 0)
+            if(++cmd[3] == 0)
+               if((++cmd[2] == 0) && (device->dma = 0,1))
+                  goto out; /*Try to read the next sector.*/
+   }
+out:
+   freePages(getPhysicsPage(buf),0); /*Free the buffer.*/
+   return retval;
 }
 
 static int ideReadSectorATAPI(IDEDevice *device,u64 lba,u8 sector,void *buf)
 {
    u8 cmd[12] = {0xa8 /*READ (12).*/,0,0,0,0,0,0,0,0,0,0,0};
       /*SCSI Command.*/
-   if(sector >= 128)
+   if(sector >= 32)
       return -1;
 
    cmd[9] = sector;
@@ -330,7 +408,7 @@ static int ideReadSectorATAPI(IDEDevice *device,u64 lba,u8 sector,void *buf)
    cmd[4] = (lba >> 0x08) & 0xff;
    cmd[5] = (lba >> 0x00) & 0xff; /*Set this scsi command.*/
 
-   int ret = ideSendCommandATAPI(device,cmd,sizeof(cmd),sector * ATAPI_SECTOR_SIZE,buf);
+   int ret = ideSendCommandATAPI(device,cmd,sizeof(cmd),sector * ATAPI_SECTOR_SIZE,buf,1);
 
    return ret;
 }
@@ -344,42 +422,60 @@ static int ideRead(void *data,u64 start,u64 size,void *buf)
       return -1;
    }else if(device->type == IDEDeviceTypeATAPI)
    {
-      if(size % ATAPI_SECTOR_SIZE == 0 && start % ATAPI_SECTOR_SIZE == 0)
-         return ideReadSectorATAPI(device,start / ATAPI_SECTOR_SIZE,size / ATAPI_SECTOR_SIZE,buf);
+      int ret = -1;
+      void *__buf = allocDMAPages(0,32);
+      if(!__buf) /*Alloc a DMA buffer at first.*/
+         return -1;
+      __buf = getPhysicsPageAddress((PhysicsPage *)__buf);
       u64 lba = start / ATAPI_SECTOR_SIZE;
       if(start % ATAPI_SECTOR_SIZE != 0)
       {
-         if(ideReadSectorATAPI(device,lba,1,ideIOBuffer))
-            return -1;
+         if(ideReadSectorATAPI(device,lba,1,__buf))
+            goto out;
          u64 __size;
          if(size < ATAPI_SECTOR_SIZE - start % ATAPI_SECTOR_SIZE)
             __size = size;
          else
             __size = ATAPI_SECTOR_SIZE - start % ATAPI_SECTOR_SIZE;
-         memcpy((void *)buf,(const void *)ideIOBuffer + start % ATAPI_SECTOR_SIZE,__size);
+         memcpy((void *)buf,(const void *)__buf + start % ATAPI_SECTOR_SIZE,__size);
          ++lba;
          size -= __size;
+         ret = 0;
          if(size == 0)
-            return 0;
+            goto out;
+         ret = -1;
       }
       int count = size / ATAPI_SECTOR_SIZE;
       if(start % ATAPI_SECTOR_SIZE != 0)
          --count;
-      while(count > 0)
+#define PAGE_SECTOR (PHYSICS_PAGE_SIZE / ATAPI_SECTOR_SIZE)
+      while(count > PAGE_SECTOR)
       {
-         if(ideReadSectorATAPI(device,lba,1,buf))
-            return -1;
-         buf += ATAPI_SECTOR_SIZE;
-         ++lba;
-         --count;
+         if(ideReadSectorATAPI(device,lba,PAGE_SECTOR,__buf))
+            goto out;
+         memcpy((void *)buf,(const void *)__buf,PHYSICS_PAGE_SIZE);
+         buf += PHYSICS_PAGE_SIZE;
+         lba += PAGE_SECTOR;
+         count -= PAGE_SECTOR;
       }
+#undef PAGE_SECTOR
+      if(!count)
+         goto next;
+      if(ideReadSectorATAPI(device,lba,count,__buf))
+         goto out;
+      memcpy((void *)buf,(const void *)__buf,count * ATAPI_SECTOR_SIZE);
+      buf += ATAPI_SECTOR_SIZE * count;
+next:
       if(size % ATAPI_SECTOR_SIZE != 0)
       {
-         if(ideReadSectorATAPI(device,lba,1,ideIOBuffer))
-            return -1;
-         memcpy(buf,ideIOBuffer,size % ATAPI_SECTOR_SIZE);
+         if(ideReadSectorATAPI(device,lba,1,__buf))
+            goto out;
+         memcpy(buf,__buf,size % ATAPI_SECTOR_SIZE);
       }
-      return 0;
+      ret = 0;
+out:
+      freePages(getPhysicsPage(__buf),0); /*Free the buffer.*/
+      return ret;
    }else
    {
       return -1;
@@ -408,6 +504,9 @@ static int ideParseIdentifyData(IDEDevice *device,IDEDeviceType type,void *__dat
       if(deviceType != 0x5) 
          return -1;  /*CD-ROM device?*/
       device->subType = IDEDeviceSubTypeCDROM;
+      device->dma = !!(data[49] & (1 << 8));
+      if(device->dma)
+         ideGetDMASupportATAPI(device);
    }else
    {
       return -1;
@@ -442,16 +541,23 @@ static int ideEnable(Device *device)
    ports[IDE_SECONDARY].ctrl = pci->bar[3] ? : 0x374;
    ports[IDE_SECONDARY].busMasterIDE = (pci->bar[4] & 0xfffffffc) + 8;
 
-   ideOutb(IDE_PRIMARY  ,IDE_REG_CONTROL,IDE_DISABLE_IRQ);
-   ideOutb(IDE_SECONDARY,IDE_REG_CONTROL,IDE_DISABLE_IRQ);
+   requestIRQ(IDE_PRIMARY_IRQ,&ideIRQPrimary);
+   requestIRQ(IDE_SECONDARY_IRQ,&ideIRQSecondary); 
+      /*Request these IRQs.*/
+
+   u8 buf[128 * 4];
 
    for(int i = 0;i < 2;++i)
    {
       for(int j = 0;j < 2;++j)
       {
+         ideOutb(IDE_PRIMARY  ,IDE_REG_CONTROL,IDE_DISABLE_IRQ);
+         ideOutb(IDE_SECONDARY,IDE_REG_CONTROL,IDE_DISABLE_IRQ);
+
          ideDevices[i][j].primary = i;
          ideDevices[i][j].master = j;
          ideDevices[i][j].type = InvalidIDEDevice;
+         ideDevices[i][j].prdt = 0;
 
          u8 error = 0;
          IDEDeviceType type = IDEDeviceTypeATA;
@@ -487,9 +593,10 @@ static int ideEnable(Device *device)
                continue;
          }
 
-         ideInsl(i,IDE_REG_DATA,128,ideIOBuffer);
+         ideInsl(i,IDE_REG_DATA,128,buf);
          
-         ideParseIdentifyData(&ideDevices[i][j],type,ideIOBuffer);
+         ideDevices[i][j].prdt = allocDMAPages(0,32);
+         ideParseIdentifyData(&ideDevices[i][j],type,buf);
             /*Read and parse it.*/
          if(ideDevices[i][j].subType == IDEDeviceSubTypeCDROM)
          {
@@ -505,14 +612,19 @@ static int ideEnable(Device *device)
          }
       }
    }
-   requestIRQ(IDE_PRIMARY_IRQ,&ideIRQPrimary);
-   requestIRQ(IDE_SECONDARY_IRQ,&ideIRQSecondary); 
-      /*Request these IRQs.*/
    return 0;
 }
 
 static int ideDisable(Device *device)
 {
+   for(int i = 0;i < 2;++i)
+   {
+      for(int j = 0;j < 2;++j)
+      {
+         if(ideDevices[i][j].prdt)
+            freePages(ideDevices[i][j].prdt,0);
+      }
+   }
    memset(ports,0,sizeof(ports));
      /*Only memset it.*/
    freeIRQ(IDE_PRIMARY_IRQ);
@@ -523,7 +635,7 @@ static int ideDisable(Device *device)
 static int cdromStatusCheck(IDEDevice *device)
 {
    u8 cmd[12] = {0x25 /*Read Capacity.*/,0,0,0,0,0,0,0,0,0,0,0};
-   int ret = ideSendCommandATAPI(device,cmd,sizeof(cmd),8,ideIOBuffer);
+   int ret = ideSendCommandATAPI(device,cmd,sizeof(cmd),8,0,0);
    if(ret < 0)
       return 1; /*Not inserted.*/
    return 0; /*This media is inserted.*/
@@ -570,6 +682,7 @@ static int ideIRQCommon(int primary,IDEInterruptWait *wait)
 
    if(wait)
    {
+      wait->bmstatus = busMasterIDEStatus;
       wait->status = status; /*Wake up the task that is waiting.*/
       wakeUpTask(wait->task);
    }

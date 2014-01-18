@@ -592,10 +592,10 @@ log: bochsout.txt
 # cause bochs to become unstable.  The panic is a "graceful exit," so
 # if you disable it you may get a spectacular disaster instead.
 #=======================================================================
-panic: action=ask
-error: action=ignore
-info: action=ignore
-debug: action=ignore
+panic: action=report
+error: action=report
+info: action=report
+debug: action=report
 
 #=======================================================================
 # DEBUGGER_LOG:

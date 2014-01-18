@@ -159,6 +159,39 @@ PhysicsPage *allocAlignedPages(unsigned int order)
    return 0;
 }
 
+PhysicsPage *allocDMAPages(unsigned int order,unsigned int max)
+{
+   unsigned int currentOrder = order;
+   u64 size;
+   PhysicsPage *page,*buddy;
+   for(;currentOrder < MAX_ORDER;++currentOrder)
+   {
+      for(ListHead *list = freeList[currentOrder].next;list != &freeList[currentOrder];list = list->next)
+      {
+         page = listEntry(list,PhysicsPage,list);
+         pointer address = va2pa(getPhysicsPageAddress(page));
+         if((address & ((1ul << max) - 1)) != address)
+            continue;
+         ++page->count;
+         page->flags &= ~PageData;
+         page->data = 0;
+         listDelete(&page->list);
+         size = 1ul << currentOrder;
+         while(currentOrder > order)
+         {
+            --currentOrder;
+            size >>= 1;
+            buddy = page + size;
+            listAddTail(&buddy->list,&freeList[currentOrder]);
+            buddy->flags |= PageData;
+            buddy->data = currentOrder;
+         } /*Split the page.*/
+         return page;
+      }
+   }
+   return 0;
+}
+
 PhysicsPage *getMemoryMap(void)
 {
    return memoryMap;

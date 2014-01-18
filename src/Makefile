@@ -131,7 +131,7 @@ cachedir:
             ../include/core/list.h ../include/cpu/spinlock_types.h ../include/cpu/spinlock.h \
 	    ../include/driver/pci.h ../include/cpu/io.h ../include/lib/string.h ../include/interrupt/interrupt.h \
 	    ../include/task/task.h ../include/filesystem/block.h ../include/task/semaphore.h \
-	    ../include/task/waitqueue.h ../include/cpu/atomic.h
+	    ../include/task/waitqueue.h ../include/cpu/atomic.h ../include/memory/buddy.h
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/semaphore.o: task/semaphore.c ../include/core/const.h ../include/task/semaphore.h \
                   ../include/task/waitqueue.h ../include/task/task.h ../include/core/list.h \
