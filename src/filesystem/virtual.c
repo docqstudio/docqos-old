@@ -111,6 +111,8 @@ static VFSDentry *vfsLookUp(const char *__path)
       ret = getCurrentTask()->fs->root;
    else
       ret = getCurrentTask()->fs->pwd;
+   if(!ret)
+      return 0;
    ret = vfsLookUpDentry(ret);
    for(;;)
    {

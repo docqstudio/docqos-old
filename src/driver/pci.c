@@ -10,6 +10,7 @@
 
 #define PCI_CMD_VENDOR_WORD      0x0000
 #define PCI_CMD_DEVICE_WORD      0x0002
+#define PCI_CMD_INTERRUPT_WORD   0x003c
 
 #define PCI_CMD_REVISION_BYTE    0x0008
 #define PCI_CMD_PROGIF_BYTE      0x0009
@@ -95,6 +96,7 @@ static int parseFunction(u16 bus,u16 device,u16 function)
 
    pci->globalDevice.type = DeviceTypePCI;
 
+   pci->interrupt = pciInw(bus,device,function,PCI_CMD_INTERRUPT_WORD);
    pci->vendor = pciInw(bus,device,function,PCI_CMD_VENDOR_WORD);
    pci->device = pciInw(bus,device,function,PCI_CMD_DEVICE_WORD);
    /*Get some information.*/

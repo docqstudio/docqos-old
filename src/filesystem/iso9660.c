@@ -73,7 +73,7 @@ static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount)
    return 0;
 }
 
-static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *__name)
+static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
 {
    if(dentry->type != VFSDentryDir)
       return -1;
@@ -82,10 +82,8 @@ static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *__name)
    BlockIO io;
    u64 pos = 0;
    u8 isDir = 0,needRead = 1;
-   u8 realLength = strlen(__name);
+   u8 realLength = strlen(name);
    u8 length = realLength;
-   char name[length + 1];
-   memcpy((void *)name,(const void *)__name,length + 1);
    for(int i = 0;i < length;++i)
       if(name[i] == '.')
         goto next;

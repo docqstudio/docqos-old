@@ -6,7 +6,7 @@ typedef struct PCIDevice
 {
    u32 class;
    u16 vendor,device;
-   u8 irq;
+   u16 interrupt;
    u32 bar[6];
 
    struct{

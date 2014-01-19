@@ -10,7 +10,7 @@ OBJS=.obj/start.o .obj/cstart.o .obj/vesa.o .obj/string.o .obj/font.o \
    .obj/pit.o .obj/gdt.o .obj/task.o .obj/fork.o .obj/driver.o \
    .obj/pci.o .obj/ide.o .obj/semaphore.o .obj/vfs.o .obj/block.o \
    .obj/iso9660.o .obj/devfs.o .obj/elf64.o .obj/systemcall.o .obj/keyboard.o \
-   .obj/tty.o .obj/power.o
+   .obj/tty.o .obj/power.o .obj/ahci.o
 
 first:dir_boot cachedir $(TARGET)
 
@@ -173,6 +173,12 @@ cachedir:
 	$(CC) $(CFLAGS) -o $@ $<
 .obj/power.o:acpi/power.c ../include/core/const.h ../include/acpi/power.h ../include/video/console.h \
              ../include/cpu/io.h ../include/memory/paging.h ../include/interrupt/interrupt.h
+	$(CC) $(CFLAGS) -o $@ $<
+.obj/ahci.o:driver/ahci.c ../include/core/const.h ../include/driver/driver.h ../include/cpu/spinlock_types.h \
+            ../include/core/list.h ../include/driver/pci.h ../include/memory/paging.h ../include/memory/buddy.h \
+	    ../include/video/console.h ../include/filesystem/block.h ../include/interrupt/interrupt.h \
+            ../include/task/task.h ../include/cpu/atomic.h ../include/task/semaphore.h \
+	    ../include/task/waitqueue.h ../include/cpu/spinlock.h ../include/lib/string.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 $(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds

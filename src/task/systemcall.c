@@ -18,6 +18,7 @@ static u64 systemFork(IRQRegisters *reg);
 static u64 systemExit(IRQRegisters *reg);
 static u64 systemWaitPID(IRQRegisters *reg);
 static u64 systemReboot(IRQRegisters *reg);
+static u64 systemGetPID(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
    systemExecve, /*0*/
@@ -28,7 +29,8 @@ SystemCallHandler systemCallHandlers[] = {
    systemFork,  /*5*/
    systemExit,
    systemWaitPID,
-   systemReboot
+   systemReboot,
+   systemGetPID
 };
 
 static u64 systemOpen(IRQRegisters *reg)
@@ -89,6 +91,11 @@ static u64 systemReboot(IRQRegisters *reg)
       break;
    }
    return -1;
+}
+
+static u64 systemGetPID(IRQRegisters *reg)
+{
+   return getCurrentTask()->pid;
 }
 
 int doSystemCall(IRQRegisters *reg)
