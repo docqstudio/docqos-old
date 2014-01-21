@@ -19,38 +19,34 @@ static IRQInformation irqHandlerTable[IRQ_COUNT] = {};
 
 int doIRQ(IRQRegisters *reg)
 {
-   localApicSendEOI(); /*Send EOI to local APIC.*/
    int ret = 0;
    IRQInformation *info;
    switch(reg->irq)
    {
    case LOCAL_TIMER_INT: /*Local APIC Timer Interrupt?*/
-      setupLocalApicTimer(1,0); /*Disable.*/
       if(!localApicTimerHandler)
-         return 0;
+         break;
       startInterrupt();
       
       ret = (*localApicTimerHandler)(reg,0);
 
       closeInterrupt();
-      setupLocalApicTimer(0,0); /*Enable.*/
       break;
    default:
       if(reg->irq >= IRQ_COUNT)
-         return 0;
-      ioApicDisableIRQ((u8)reg->irq);
+         break;
 
       info = &irqHandlerTable[reg->irq];
       if(info->handler == 0)
-         return 0; /*We needn't to enable this IRQ,it should be disabled.*/
+         break;
       startInterrupt();
 
       ret = (*info->handler)(reg,info->data);
 
       closeInterrupt();
-      ioApicEnableIRQ((u8)reg->irq); /*Enable this irq.*/
       break;
    }
+   localApicSendEOI(); /*Send EOI to local APIC.*/
    if(ret == 1)/*Need schedule.*/
    {
       preemptionSchedule();

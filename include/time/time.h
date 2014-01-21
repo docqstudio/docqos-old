@@ -22,6 +22,7 @@ Timer *createTimer(TimerCallBackFunction callback,
 int addTimer(Timer *timer);
 int removeTimer(Timer *timer);
 
+int doGetTimeOfDay(u64 *time,void *unused);
 unsigned long long getTicks(void);
 
 int initTime(void);

@@ -148,6 +148,7 @@ static int ahciDisable(Device *device);
 static AHCIRegisters *ahciHBA;
 static u8 ahciIRQVector;
 static BlockDevice ahciBlockDevices[AHCI_MAX_PORTS];
+static Semaphore ahciSemaphore;
 
 static Driver ahciDriver = 
 {
@@ -174,6 +175,8 @@ static int ahciSendCommandATAPI(AHCIPort *port,u8 *command,u8 commandSize,
 {
    if(commandSize != 12 && commandSize != 16)
       return -1;
+   downSemaphore(&ahciSemaphore);
+
    AHCICommandHeader *header = pa2va(port->commandList);
    AHCICommandTable *table = pa2va(header->command);
    AHCIHostToDeviceFIS *fis = (AHCIHostToDeviceFIS *)table->fis;
@@ -208,6 +211,8 @@ static int ahciSendCommandATAPI(AHCIPort *port,u8 *command,u8 commandSize,
    setIRQData(ahciIRQVector,0);
 
    ahciStopCommand(port);
+
+   upSemaphore(&ahciSemaphore);
    return (header->prdbc == transferSize) ? 0 : -1;
 }
 
@@ -443,6 +448,7 @@ static int ahciDisable(Device *device)
 static int initAHCI(void)
 {
    ahciHBA = 0;
+   initSemaphore(&ahciSemaphore);
    registerDriver(&ahciDriver); /*Register the driver.*/
    return 0;
 }

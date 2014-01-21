@@ -3,6 +3,7 @@
 #include <task/task.h>
 #include <filesystem/virtual.h>
 #include <acpi/power.h>
+#include <time/time.h>
 
 #define REBOOT_MAGIC_CMD    0xacde147525474417ul
 #define POWEROFF_MAGIC_CMD  0x1234aeda78965421ul
@@ -19,6 +20,7 @@ static u64 systemExit(IRQRegisters *reg);
 static u64 systemWaitPID(IRQRegisters *reg);
 static u64 systemReboot(IRQRegisters *reg);
 static u64 systemGetPID(IRQRegisters *reg);
+static u64 systemGetTimeOfDay(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
    systemExecve, /*0*/
@@ -30,7 +32,8 @@ SystemCallHandler systemCallHandlers[] = {
    systemExit,
    systemWaitPID,
    systemReboot,
-   systemGetPID
+   systemGetPID,
+   systemGetTimeOfDay /*10*/
 };
 
 static u64 systemOpen(IRQRegisters *reg)
@@ -96,6 +99,11 @@ static u64 systemReboot(IRQRegisters *reg)
 static u64 systemGetPID(IRQRegisters *reg)
 {
    return getCurrentTask()->pid;
+}
+
+static u64 systemGetTimeOfDay(IRQRegisters *reg)
+{
+   return doGetTimeOfDay((u64 *)reg->rbx,(void *)reg->rcx);
 }
 
 int doSystemCall(IRQRegisters *reg)

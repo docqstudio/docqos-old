@@ -2,6 +2,7 @@
 #include <time/time.h>
 #include <time/hpet.h>
 #include <time/pit.h>
+#include <time/rtc.h>
 #include <interrupt/interrupt.h>
 #include <video/console.h>
 #include <task/task.h>
@@ -109,5 +110,11 @@ int removeTimer(Timer *timer)
    unlockSpinLockRestoreInterrupt(&timerLock,&rflags);
    if(!timer->onStack)
       kfree(timer);
+   return 0;
+}
+
+int doGetTimeOfDay(u64 *time,void *unused)
+{
+   *time = readRTC();
    return 0;
 }

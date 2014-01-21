@@ -1,0 +1,59 @@
+#! /usr/bin/perl
+
+use File::Find;
+use File::Basename;
+
+$objs = ""; 
+$info = "";
+@files = (); #*.c and *.S files.
+$count = 0;
+
+sub addFileToArray {
+   $name = $File::Find::name;
+   (undef,$path,undef) = fileparse($name,qr"\..*"); #Get the path of this file.
+   return if(($path =~ /\/boot\//)); #Return if this file is in the 'boot' directory.
+   $files[$count++] = $name if(($name =~ /.*\.c$/)); #*.c file.
+   $files[$count++] = $name if(($name =~ /.*\.S$/)); #*.S file.
+}
+
+find({wanted => \&addFileToArray,no_chdir => 0},".");
+
+$count = 0;
+foreach $file (@files)
+{
+   $__info = `gcc -M -I ../include $file`; 
+   $__info = ".obj/$count" . $__info . "\t\$(CC) \$(CFLAGS) -o \$@ \$<\n" if(($file =~ /.*\.c$/));
+                #*.c files.
+   $__info = ".obj/$count" . $__info . "\t\$(AS) \$(ASFLAGS) -o \$@ \$<\n" if(($file =~ /.*\.S$/));
+                #*.S files.
+   $info .= $__info;
+   ++$count;
+}
+
+$objs = "OBJS =";
+$count = 0;
+foreach $file (@files)
+{
+   $basename = "";
+   ($basename,undef,undef) = fileparse($file,qr"\..*");
+      #Get the real file name of this file. (No suffixes.)
+
+   $basename = ".obj/" . $count . $basename . ".o ";
+   $objs .= $basename;
+   ++$count;
+   $objs .= "\\\n" if(($count % 4) eq 0); #Add a `\n` per 4 objs.
+}
+$objs .= "\n";
+
+open(FD1,"<Makefile.base");
+open(FD2,">Makefile"); #Open files0
+
+print FD2 $objs; #Write obj.
+while($data = <FD1>)
+{
+   print FD2 $data; #Copy Makefile.base to Makefile.
+}
+print FD2 $info; #Write info.
+
+close(FD1);
+close(FD2); #Close files.

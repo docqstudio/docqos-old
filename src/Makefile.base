@@ -1,0 +1,21 @@
+ROOT=..
+include ../Makefile.config
+TARGET=$(ROOT)/bin/kernel
+first:dir_boot cachedir $(TARGET)
+
+dir_boot: boot
+	cd boot && $(MAKE) -f Makefile
+
+clean: dir_boot_clean
+	$(RM) .obj
+
+dir_boot_clean:
+	cd boot && $(MAKE) -f Makefile clean
+
+cachedir:
+	if [ ! -d .obj ]; then \
+	mkdir .obj; \
+	fi
+$(TARGET):$(OBJS) $(ROOT)/ldscripts/kernel.lds
+	$(LD) $(LDFLAGS_ELF) -T$(ROOT)/ldscripts/kernel.lds -o $(KERNEL_ELF) $(OBJS)
+	$(TOBINARY) $(KERNEL_ELF) $(TARGET)

@@ -1,5 +1,6 @@
 .section ".magic"
 .ascii "KERNEL"
+.quad _start
 
 .section ".text","ax"
 .code64

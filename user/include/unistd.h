@@ -16,3 +16,5 @@ unsigned long write(int fd,const void *buf,unsigned long size);
 int execve(const char *path,const char *arg[],const char *envp[]);
 int waitpid(int pid,int *result,int nowait);
 int reboot(unsigned long command);
+int getpid(void);
+int gettimeofday(unsigned long *time,void *unused);

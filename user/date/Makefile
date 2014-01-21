@@ -1,13 +1,13 @@
 ROOT=../..
 include $(ROOT)/Makefile.config
-TARGET=$(ROOT)/bin/hello
-OBJS=.obj/hello.o
+TARGET=$(ROOT)/bin/date
+OBJS=.obj/date.o
 
 first:cachedir $(TARGET)
 
 cachedir:
 	mkdir -p .obj
-.obj/hello.o:hello.c ../include/unistd.h
+.obj/date.o:date.c ../include/unistd.h
 	$(CC) $(CFLAGS_USER) -o $@ $<
 $(TARGET):$(OBJS)
 	$(LD) $(LDFLAGS_USER) -o $(TARGET) $(OBJS)

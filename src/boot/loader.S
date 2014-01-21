@@ -678,6 +678,7 @@ longMode: .code64
    movq $(KERNEL_ENTRY_ADDRESS + PAGE_OFFSET),%rax
    addq %rcx,%rax /*Now %rax is kernel's address.*/
 
+   movq (%rax),%rax
 
 /************************************************/
    jmp *%rax  /*Go into kernel!!*/
