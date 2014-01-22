@@ -88,7 +88,7 @@ static int setPTE(void *__pte,pointer address,pointer p)
    u64 nr = (address >> 12) & 0x1ff;
    u64 data = pte[nr];
    if(data & 0x1) /*It has set?*/
-      return -1;
+      return -EBUSY;
    pte[nr] = ((u64)p) + 0x007; /*P,R/W and U/S.*/
    return 0;
 }
@@ -311,21 +311,24 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
    len = (len + 0xfff) & ~0xfff;
    address &= ~0xfff;
    if(address + len < address || address + len > PAGE_OFFSET)
-      return -1; /*Can't map kernel pages.*/
+      return -EFAULT; /*Can't map kernel pages.*/
    len >>= 12; /*Get pages which need map.*/
    if(file)
       if(lseekFile(file,offset) < 0)
-         return -1;
+         return -EINVAL;
+   int retval;
    while(len--)
    {
       page = allocPages(0);
+      retval = -ENOMEM;
       if(!page)
          goto failed;
       void *data = getPhysicsPageAddress(page);
       if(file)
-         if(readFile(file,data,0x1000) <= 0)
+         if((retval = readFile(file,data,0x1000)) <= 0)
             goto failed;
       /*If file is null,map a page without data.*/
+      retval = -ENOMEM;
       void *pdpte = allocPDPTE(pml4e,address);
       if(!pdpte)
          goto failed;
@@ -335,7 +338,7 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
       void *pte = allocPTE(pde,address);
       if(!pte)
          goto failed;
-      if(setPTE(pte,address,va2pa(data)))
+      if((retval = setPTE(pte,address,va2pa(data))))
          goto failed;
       address += 0x1000; /*Next page.*/
    }
@@ -345,7 +348,9 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
 failed:
    if(page)
       freePages(page,0);
-   return -1;
+   if(!retval)
+      retval = -EIO;
+   return retval;
 }
 
 int taskSwitchMemory(TaskMemory *old,TaskMemory *new)

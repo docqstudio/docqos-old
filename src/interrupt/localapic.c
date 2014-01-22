@@ -51,12 +51,12 @@ int initLocalApic(void)
    if(!checkIfCPUHasApic())
    {
       printkInColor(0xff,0x00,0x00,"Your CPU doesn't have local apic!!!\n");
-      return -1;
+      return -ENODEV;
    }
    if((localApicAddress = getLocalApicAddress()) == 0)
    {
       printkInColor(0xff,0x00,0x00,"Can't get local apic address!!!\n");
-      return -1;
+      return -ENODEV;
    }
 
    localApicOut(LOCAL_APIC_TPR,0x0);

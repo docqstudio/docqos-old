@@ -349,11 +349,11 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
 
 out:
    upSemaphore(&ideSemaphores[primary]);
-   return (sizeRead == transSize) ? 0 : -1;
+   return (sizeRead == transSize) ? 0 : -EIO;
       /*Failed if sizeRead != transSize.*/
 failed:
    upSemaphore(&ideSemaphores[primary]);
-   return -1;
+   return -EIO;
 }
 
 static int ideGetDMASupportATAPI(IDEDevice *device)
@@ -361,7 +361,7 @@ static int ideGetDMASupportATAPI(IDEDevice *device)
    u8 cmd[12] = {0xa8,0,0,0,0,0,0,0,0,1,0,0};
    u8 *buf = (u8 *)allocDMAPages(0,32); /*Alloc a DMA buffer.*/
    if(!buf)
-      return -1;
+      return -ENOMEM;
    buf = (u8 *)getPhysicsPageAddress((PhysicsPage *)buf);
    memset(buf,0x11,ATAPI_SECTOR_SIZE);
    u8 retval;
@@ -400,7 +400,7 @@ static int ideReadSectorATAPI(IDEDevice *device,u64 lba,u8 sector,void *buf)
    u8 cmd[12] = {0xa8 /*READ (12).*/,0,0,0,0,0,0,0,0,0,0,0};
       /*SCSI Command.*/
    if(sector >= 32)
-      return -1;
+      return -EINVAL;
 
    cmd[9] = sector;
    cmd[2] = (lba >> 0x18) & 0xff;
@@ -419,13 +419,13 @@ static int ideRead(void *data,u64 start,u64 size,void *buf)
    if(device->type == IDEDeviceTypeATA)
    {
       /*We will support it in the future.*/
-      return -1;
+      return -ENOSYS;
    }else if(device->type == IDEDeviceTypeATAPI)
    {
-      int ret = -1;
+      int ret = -EIO;
       void *__buf = allocDMAPages(0,32);
       if(!__buf) /*Alloc a DMA buffer at first.*/
-         return -1;
+         return -ENOMEM;
       __buf = getPhysicsPageAddress((PhysicsPage *)__buf);
       u64 lba = start / ATAPI_SECTOR_SIZE;
       if(start % ATAPI_SECTOR_SIZE != 0)
@@ -443,7 +443,7 @@ static int ideRead(void *data,u64 start,u64 size,void *buf)
          ret = 0;
          if(size == 0)
             goto out;
-         ret = -1;
+         ret = -EIO;
       }
       int count = size / ATAPI_SECTOR_SIZE;
       if(start % ATAPI_SECTOR_SIZE != 0)
@@ -478,7 +478,7 @@ out:
       return ret;
    }else
    {
-      return -1;
+      return -ENOSYS;
    }
 }
 
@@ -497,19 +497,19 @@ static int ideParseIdentifyData(IDEDevice *device,IDEDeviceType type,void *__dat
    device->type = type;
    if(type == IDEDeviceTypeATA)
    {
-      return -1;
+      return -ENOSYS;
    }else if(type == IDEDeviceTypeATAPI)
    {
       u8 deviceType = ((*data) & 0x1f00) >> 8;
       if(deviceType != 0x5) 
-         return -1;  /*CD-ROM device?*/
+         return -ENOSYS;  /*CD-ROM device?*/
       device->subType = IDEDeviceSubTypeCDROM;
       device->dma = !!(data[49] & (1 << 8));
       if(device->dma)
          ideGetDMASupportATAPI(device);
    }else
    {
-      return -1;
+      return -ENOSYS;
    }
    return 0;
 }
@@ -517,12 +517,12 @@ static int ideParseIdentifyData(IDEDevice *device,IDEDeviceType type,void *__dat
 static int ideProbe(Device *device)
 {
    if(ports[0].base)
-      return -1; /*It has been inited.*/
+      return 1; /*It has been inited.*/
    if(device->type != DeviceTypePCI)
-      return -1; /*Is it PCI Device?*/
+      return 1; /*Is it PCI Device?*/
    PCIDevice *pci = containerOf(device,PCIDevice,globalDevice);
    if((pci->class & IDE_PCI_CLASS_MASK) != IDE_PCI_CLASS)
-      return -1; /*Is it IDE?*/
+      return 1; /*Is it IDE?*/
 
    return 0;
 }
@@ -530,7 +530,7 @@ static int ideProbe(Device *device)
 static int ideEnable(Device *device)
 {
    if(ports[0].base != 0)
-      return -1;
+      return -EBUSY;
    PCIDevice *pci = containerOf(device,PCIDevice,globalDevice);
 
    ports[IDE_PRIMARY  ].base = pci->bar[0] ? : 0x1f0;
@@ -672,11 +672,11 @@ static int ideIRQCommon(int primary,IDEInterruptWait *wait)
 {
    if(wait)
       if(wait->primary != primary)
-         return -1; /*It should never arrive here.*/
+         return -EINVAL; /*It should never arrive here.*/
    u8 busMasterIDEStatus = ideInb(primary,IDE_REG_BMSTATUS);
    u8 status = ideInb(primary,IDE_REG_STATUS); /*Get status.*/
    if(!(busMasterIDEStatus & IDE_BMSTATUS_INTERRUPT))
-      return -1; 
+      return -ENODEV; 
    ideOutb(primary,IDE_REG_BMSTATUS,IDE_BMSTATUS_INTERRUPT);
    ideOutb(primary,IDE_REG_BMCOMMAND,0x0);
 

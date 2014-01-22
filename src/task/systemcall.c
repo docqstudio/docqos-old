@@ -93,7 +93,7 @@ static u64 systemReboot(IRQRegisters *reg)
    default:
       break;
    }
-   return -1;
+   return -ENOSYS;
 }
 
 static u64 systemGetPID(IRQRegisters *reg)
@@ -108,7 +108,7 @@ static u64 systemGetTimeOfDay(IRQRegisters *reg)
 
 int doSystemCall(IRQRegisters *reg)
 {
-   u64 ret = (u64)-1;
+   u64 ret = (u64)-ENOSYS;
    if(reg->rax >= sizeof(systemCallHandlers) / sizeof(systemCallHandlers[0]))
       goto out;
    ret = (*systemCallHandlers[reg->rax])(reg);

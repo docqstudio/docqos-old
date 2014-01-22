@@ -44,7 +44,7 @@ int initTime(void)
 {
    if(initHpet(timeInterrupt,TIMER_HZ))
       if(initPit(timeInterrupt,TIMER_HZ))
-         return -1;
+         return -ENODEV;
 
    initList(&timers);
    initSpinLock(&timerLock);

@@ -51,7 +51,7 @@ static int devfsLookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
          return 0;
       }
    }
-   return -1;
+   return -ENOENT;
 }
 
 static int devfsMount(BlockDevicePart *part __attribute__ ((unused))
@@ -67,7 +67,7 @@ static int devfsOpen(VFSDentry *dentry,VFSFile *file)
 {
    DevfsINode *inode = (DevfsINode *)dentry->inode->data;
    if(!inode->operation)
-      return -1;
+      return -EINVAL;
    file->operation = inode->operation;
    file->dentry = dentry;
    file->seek = 0;
@@ -95,18 +95,18 @@ int devfsRegisterBlockDevice(BlockDevicePart *part,const char *name)
    while(*name != '\0' && *name == '/')
       ++name; /*Skip '/'.*/
    if(*name == '\0')
-      return -1; /*If name only has '/',return.*/
+      return -EINVAL; /*If name only has '/',return.*/
    if(unlikely(!part))
-      return -1; /*If part is 0,return.*/
+      return -EINVAL; /*If part is 0,return.*/
    int len = strlen(name); /*Get length of name.*/
    if(len > 14)
-      return -1;
+      return -ENAMETOOLONG;
    for(int i = 0;i < len;++i)
       if(name[i] == '/')
-         return -1; /*If name has '/',return.*/
+         return -EINVAL; /*If name has '/',return.*/
    DevfsINode *inode = kmalloc(sizeof(*inode));
    if(unlikely(!inode)) /*No memory,return.*/
-      return -1;
+      return -ENOMEM;
    memcpy(inode->name,name,len + 1);
    inode->part = part;
    inode->operation = 0;
@@ -122,18 +122,18 @@ int devfsRegisterDevice(VFSFileOperation *operation,const char *name)
    while(*name != '\0' && *name == '/')
       ++name; /*Skip '/'.*/
    if(*name == '\0')
-      return -1; /*If name only has '/',return.*/
+      return -EINVAL; /*If name only has '/',return.*/
    if(unlikely(!operation))
-      return -1; /*If operation is 0,return.*/
+      return -EINVAL; /*If operation is 0,return.*/
    int len = strlen(name); /*Get length of name.*/
    if(len > 14)
-      return -1;
+      return -ENAMETOOLONG;
    for(int i = 0;i < len;++i)
       if(name[i] == '/')
-         return -1; /*If name has '/',return.*/
+         return -EINVAL; /*If name has '/',return.*/
    DevfsINode *inode = kmalloc(sizeof(*inode));
    if(unlikely(!inode)) /*No memory,return.*/
-      return -1;
+      return -ENOMEM;
    memcpy(inode->name,name,len + 1);
    inode->part = 0;
    inode->operation = operation;

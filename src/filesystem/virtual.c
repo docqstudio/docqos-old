@@ -281,17 +281,17 @@ VFSFile *openFile(const char *path)
 {
    VFSDentry *dentry = vfsLookUp(path);
    if(!dentry)
-      return 0;
+      return (VFSFile *)makeErrorPointer(-ENOENT);
    if(dentry->type == VFSDentryDir)
    {
       vfsLookUpClear(dentry);
-      return 0; /*Return -1 if failed.*/
+      return (VFSFile *)makeErrorPointer(-EISDIR); /*Return if failed.*/
    }
    VFSFile *file = kmalloc(sizeof(VFSFile));
    if(unlikely(!file))
    {
       vfsLookUpClear(dentry);
-      return 0;
+      return (VFSFile *)makeErrorPointer(-ENOMEM);
    }
    file->dentry = dentry;
    int ret = (*dentry->inode->operation->open)(dentry,file);
@@ -299,7 +299,7 @@ VFSFile *openFile(const char *path)
    {
       kfree(file);
       vfsLookUpClear(dentry);
-      return 0;
+      return (VFSFile *)makeErrorPointer(ret);
    }
    return file;
 }
@@ -307,7 +307,7 @@ VFSFile *openFile(const char *path)
 int readFile(VFSFile *file,void *buf,u64 size)
 {
    if(!file->operation->read)
-      return -1;
+      return -EBADFD;
    int ret = (*file->operation->read)(file,buf,size);
    return ret; /*Call file->operation->read.*/
 }
@@ -315,7 +315,7 @@ int readFile(VFSFile *file,void *buf,u64 size)
 int writeFile(VFSFile *file,const void *buf,u64 size)
 {
    if(!file->operation->write)
-      return -1;
+      return -EBADFD;
    int ret = (*file->operation->write)(file,buf,size);
    return ret;
 }
@@ -323,7 +323,7 @@ int writeFile(VFSFile *file,const void *buf,u64 size)
 int lseekFile(VFSFile *file,u64 offset)
 {
    if(!file->operation->lseek)
-      return -1;
+      return -EBADFD;
    return (*file->operation->lseek)(file,offset);
 }
 
@@ -343,53 +343,56 @@ int doOpen(const char *path)
       fd < sizeof(current->files->fd) / sizeof(current->files->fd[0]);++fd)
       if(current->files->fd[fd] == 0)
          goto found; /*Found a null position in current->fd.*/
-   return -1;
-found:
-   current->files->fd[fd] = openFile(path); /*Done!*/
-   return current->files->fd[fd] ? fd : -1;
+   return -EMFILE;
+found:;
+   VFSFile *file = openFile(path);
+   if(isErrorPointer(file))
+      return getPointerError(file);
+   current->files->fd[fd] = file;
+   return fd;
 }
 
 int doRead(int fd,void *buf,u64 size)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
-      return -1;
+      return -EBADF;
    Task *current = getCurrentTask();
    VFSFile *file = current->files->fd[fd];
    if(!file)
-      return -1;
+      return -EBADF;
    return readFile(file,buf,size); /*Call file->operation->read.*/
 }
 
 int doWrite(int fd,const void *buf,u64 size)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
-      return -1;
+      return -EBADF;
    Task *current = getCurrentTask();
    VFSFile *file = current->files->fd[fd];
    if(!file)
-      return -1;
+      return -EBADF;
    return writeFile(file,buf,size); /*Call file->operation->write.*/
 }
 
 int doLSeek(int fd,u64 offset)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
-      return 0;
+      return -EBADF;
    Task *current = getCurrentTask();
    VFSFile *file = current->files->fd[fd];
    if(!file)
-      return -1;
+      return -EBADF;
    return lseekFile(file,offset);
 }
 
 int doClose(int fd)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
-      return -1;
+      return -EBADF;
    Task *current = getCurrentTask();
    VFSFile *file = current->files->fd[fd];
-   if(!file) /*If there are no files,return -1.*/
-      return -1;
+   if(!file) /*If there are no files,return.*/
+      return -EBADF;
    current->files->fd[fd] = 0;
    return closeFile(file);
 }
@@ -406,13 +409,14 @@ int doChroot(FileSystemMount *mnt)
 int doUMount(const char *point)
 {
    if(point[0] == '/' && point[1] == '\0')
-      return -1; /*Can not umount / .*/
+      return -EPERM; /*Can not umount / .*/
    int ret;
    VFSDentry *dentry = vfsLookUp(point);
    FileSystemMount *mnt; /*Look for this dentry*/
-   ret = -1;
+   ret = -EINVAL;
    if(dentry->type != VFSDentryMount)
-      goto out; 
+      goto out;
+   ret = -EBUSY;
    lockSpinLock(&dentry->lock);
    if(atomicRead(&dentry->mnt->root->ref) > 1)
       goto unlockOut; /*If this is used,failed.*/
@@ -433,7 +437,7 @@ int doMount(const char *point,FileSystem *fs,BlockDevicePart *part)
 {
    FileSystemMount *mnt = createFileSystemMount();
    if(!mnt)
-      return -1;
+      return -ENOMEM;
    if(fs && (*fs->mount)(part,mnt) == 0)
       goto found;
    if(!part)
@@ -451,12 +455,12 @@ int doMount(const char *point,FileSystem *fs,BlockDevicePart *part)
    }
 failed:
    destoryFileSystemMount(mnt);
-   return -1;
+   return -EINVAL;
 found:
    if(part)
       part->fileSystem = fs;
    if(mnt->root->type != VFSDentryDir)
-      return (destoryFileSystemMount(mnt),-1);
+      goto failed;
    if(point[0] == '/' && point[1] == '\0')
    {
       mnt->parent = 0;
@@ -470,7 +474,8 @@ found:
    if(dentry->type != VFSDentryDir)
    {
       vfsLookUpClear(dentry);
-      goto failed;
+      destoryFileSystemMount(mnt);
+      return dentry->type == VFSDentryMount ? -EBUSY : -ENOTDIR;
    }
    mnt->parent = 0; /*Unused,just do this.*/
    mnt->root->parent = dentry; 

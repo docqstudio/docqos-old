@@ -78,7 +78,7 @@ static int parseFunction(u16 bus,u16 device,u16 function)
    if(!pci)
    {
       printkInColor(0xff,0x00,0x00,"(%s)Function kmalloc failed,no memory?\n",__func__);
-      return -1;
+      return -ENOMEM;
    }
    pci->position.bus = bus;
    pci->position.function = function;
@@ -114,7 +114,7 @@ static int parseDevice(u16 bus,u16 device)
 {
    u16 vendor = pciInw(bus,device,0,PCI_CMD_VENDOR_WORD);
    if(vendor == 0xffff)
-      return -1; /*It doesn't exist!*/
+      return -ENODEV; /*It doesn't exist!*/
    
    parseFunction(bus,device,0);
 
@@ -139,7 +139,7 @@ static int initPCI(void)
    if(inl(PCI_CMD_REG) != 0x80000000)
    { /*PCI doesn't exist.*/
       printkInColor(0xff,0x00,0x00,"PCI doesn't exist!\n");
-      return -1; /*Error.*/
+      return -ENODEV; /*Error.*/
    }
 
    u8 header = pciInb(0x0,0x0,0x0,PCI_CMD_HEADER_BYTE);

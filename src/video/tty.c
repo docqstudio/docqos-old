@@ -33,9 +33,9 @@ static int ttyWrite(VFSFile *file,const void *buf,u64 size)
 static int ttyRead(VFSFile *file,void *buf,u64 size)
 {
    if(size <= 1)
-      return -1;
+      return -EINVAL;
    if(size >= sizeof(ttyReader.buf) / sizeof(ttyReader.buf[0]))
-      return -1;
+      return -EINVAL;
    Task *current = getCurrentTask();
    u64 rflags;
    lockSpinLockCloseInterrupt(&ttyReader.lock,&rflags);
@@ -53,7 +53,7 @@ static int ttyRead(VFSFile *file,void *buf,u64 size)
    return __size + 1;
 failed:
    unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   return -1;
+   return -EBUSY;
 }
 
 static int initTTY(void)

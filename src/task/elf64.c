@@ -38,33 +38,34 @@ typedef struct ELF64ProgramHeader{
 int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
 {
    ELF64Header header;
+   int retval;
    if(lseekFile(file,0) < 0)
-      return -1;
-   if(readFile(file,&header,sizeof(header)) <= 0) /*Read header.*/
-      return -1;
+      return -ENOEXEC;
+   if((retval = readFile(file,&header,sizeof(header))) <= 0) /*Read header.*/
+      return retval == -EIO ? -EIO : -ENOEXEC;
 
    if(header.ident[0] != 0x7f ||
       header.ident[1] != 'E' ||
       header.ident[2] != 'L' ||
       header.ident[3] != 'F') /*Is it an elf file?*/
-      return -1;
+      return -ENOEXEC;
    if(header.ident[4] != 2) /*Is it 64-bit?*/
-      return -1;
+      return -ENOEXEC;
    if(header.phentsize < sizeof(ELF64ProgramHeader) ||
       header.phentsize % sizeof(ELF64ProgramHeader) != 0)
-      return -1; /*Is the program headers' size right?*/
+      return -ENOEXEC; /*Is the program headers' size right?*/
 
    if(lseekFile(file,header.phoff) < 0) /*Seek file to the program headers' position.*/
-      return -1;
+      return -ENOEXEC;
    ELF64ProgramHeader phdrs[header.phentsize / sizeof(ELF64ProgramHeader)];
-   if(readFile(file,phdrs,sizeof(phdrs)) <= 0) /*Read them!*/
-      return -1;
+   if((retval = readFile(file,phdrs,sizeof(phdrs))) <= 0) /*Read them!*/
+      return retval == -EIO ? -EIO : -ENOEXEC;
 
    for(int i = 0;i < sizeof(phdrs) / sizeof(phdrs[0]);++i)
-      if(doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz))
-         return -1;
-   if(doMMap(0,0,0xffffe000,0x2000))
-      return -1;
+      if((retval = doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz)))
+         return retval;
+   if((retval = doMMap(0,0,0xffffe000,0x2000)))
+      return retval;
        /*Map the user stack,from 0xffffe000 to 0xffffffff.*/
        /*(4GB - 8K) ~ 4GB.*/
    pointer stackTop = 0xfffffffful;

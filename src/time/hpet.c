@@ -129,7 +129,7 @@ static inline int hpetStartTimer(int index,int periodic,u32 time)
       if(conf & HPET_TIMER_CONF_PER_CAP) /*Check support for periodic mode.*/
          conf |= HPET_TIMER_CONF_PERIODIC;
       else
-         return -1;
+         return -EPROTONOSUPPORT;
    }else{
       conf &= ~HPET_TIMER_CONF_PERIODIC;
    }
@@ -144,7 +144,7 @@ int initHpet(IRQHandler handler,unsigned int hz)
 {
    hpetAddress = getHpetAddress();
    if(!hpetAddress)
-      return -1;
+      return -ENODEV;
       /*Then we will use PIT,so we should not print this error.*/
    u32 period = hpetIn(HPET_PERIOD_REG);
 
@@ -171,7 +171,7 @@ int initHpet(IRQHandler handler,unsigned int hz)
    {
       printk("HPET didn't count,discard.\n");
       disableHpet();
-      return -1;
+      return -ENOSTR;
    }
 
    itoa(counter,temp,0x10,16,'0',1);
@@ -180,13 +180,13 @@ int initHpet(IRQHandler handler,unsigned int hz)
    if(requestIRQ(TIMER0_IRQ,handler))
    {
       disableHpet();
-      return -1;
+      return -EBUSY;
    }
    if(hpetStartTimer(0,1,hz)) /*Start timer on IRQ2 (ACPI).*/
    {
       freeIRQ(TIMER0_IRQ);
       disableHpet();
-      return -1;
+      return -EPROTONOSUPPORT;
    }
    enableHpetInterrupt();
 

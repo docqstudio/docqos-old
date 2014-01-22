@@ -174,7 +174,7 @@ static int ahciSendCommandATAPI(AHCIPort *port,u8 *command,u8 commandSize,
                                void *buffer,u64 transferSize)
 {
    if(commandSize != 12 && commandSize != 16)
-      return -1;
+      return -EINVAL;
    downSemaphore(&ahciSemaphore);
 
    AHCICommandHeader *header = pa2va(port->commandList);
@@ -213,14 +213,14 @@ static int ahciSendCommandATAPI(AHCIPort *port,u8 *command,u8 commandSize,
    ahciStopCommand(port);
 
    upSemaphore(&ahciSemaphore);
-   return (header->prdbc == transferSize) ? 0 : -1;
+   return (header->prdbc == transferSize) ? 0 : -EIO;
 }
 
 static int ahciReadSectorATAPI(AHCIPort *port,u64 lba,u8 sector,void *buffer)
 {
    u8 cmd[12] = {0xa8,0,0,0,0,0,0,0,0,0,0,0};
    if(sector >= 32)
-      return -1;
+      return -EINVAL;
    cmd[9] = sector;
    cmd[2] = (lba >> 0x18) & 0xff;
    cmd[3] = (lba >> 0x10) & 0xff;
@@ -237,13 +237,14 @@ static int ahciRead(void *data,u64 start,u64 size,void *buf)
    if(port->signature == AHCI_PORT_ATA)
    {
       /*We will support it in the future.*/
-      return -1;
+      return -ENOSYS;
    }else if(port->signature == AHCI_PORT_ATAPI)
    {
-      int ret = -1;
-      void *__buf = allocDMAPages(0,32);
-      if(!__buf) /*Alloc a DMA buffer at first.*/
-         return -1;
+      int ret = -EIO;
+      void *__buf = allocPages(0); /*Alloc a DMA buffer at first.*/
+      /*AHCI Support 64-bit physics address.So we just call 'allocPages'.*/
+      if(!__buf) 
+         return -ENOMEM; 
       __buf = getPhysicsPageAddress((PhysicsPage *)__buf);
       u64 lba = start / ATAPI_SECTOR_SIZE;
       if(start % ATAPI_SECTOR_SIZE != 0)
@@ -261,7 +262,7 @@ static int ahciRead(void *data,u64 start,u64 size,void *buf)
          ret = 0;
          if(size == 0)
             goto out;
-         ret = -1;
+         ret = -EIO;
       }
       int count = size / ATAPI_SECTOR_SIZE;
       if(start % ATAPI_SECTOR_SIZE != 0)
@@ -296,17 +297,17 @@ out:
       return ret;
    }else
    {
-      return -1;
+      return -ENOSYS;
    }
 }
 
 static int ahciProbe(Device *device)
 {
    if(device->type != DeviceTypePCI)
-      return -1;
+      return 1;
    PCIDevice *pci = containerOf(device,PCIDevice,globalDevice);
    if((pci->class & AHCI_PCI_CLASS_MASK) != AHCI_PCI_CLASS)
-      return -1;
+      return 1;
    return 0;
 }
 
@@ -326,40 +327,10 @@ static int ahciIRQ(IRQRegisters *reg,void *__data)
    return 0;
 }
 
-static int ahciEnablePortATAPI(AHCIPort *port,int i)
-{
-   PhysicsPage *cmd = allocPages(0);
-   if(!cmd)
-      return -1;
-   PhysicsPage *fis = allocPages(0);
-   if(!fis)
-      return (freePages(cmd,0),-1);
-   PhysicsPage *table = allocPages(0); /*Alloc some pages.*/
-   if(!table)
-      return (freePages(cmd,0),freePages(fis,0),-1);
-
-   port->fis = va2pa(getPhysicsPageAddress(fis));
-   port->commandList = va2pa(getPhysicsPageAddress(cmd));
-   port->interruptEnable = AHCI_PORT_ENABLE_IRQ;  /*Enable interrupts.*/
-   port->interruptStatus = 0;
-
-   AHCICommandHeader *header = (AHCICommandHeader *)getPhysicsPageAddress(cmd);
-   header->command = va2pa(getPhysicsPageAddress(table));
-   
-   BlockDevice *block = &ahciBlockDevices[i];
-   block->write = 0;
-   block->read = &ahciRead;
-   block->type = BlockDeviceCDROM;
-   block->data = (void *)port;
-   block->end = (u64)-1;
-
-   registerBlockDevice(block,"cdrom"); /*Register the block device.*/
-   return 0;
-}
-
 static int ahciDisablePortATAPI(AHCIPort *port,int i)
 {
-   /*deregisterBlockDevice(&ahciBlockDevices[i])*/
+   /*if(ahciBlockDevices[i].read)*/
+   /*   deregisterBlockDevice(&ahciBlockDevices[i])*/
 
    ahciStopCommand(port);
    port->interruptEnable = 0;
@@ -370,6 +341,94 @@ static int ahciDisablePortATAPI(AHCIPort *port,int i)
    AHCICommandHeader *header = (AHCICommandHeader *)data;
    freePages(getPhysicsPage(pa2va(header->command)),0);
    freePages(getPhysicsPage(data),0); /*Free these pages.*/
+   return 0;
+}
+
+static int ahciEnablePortATAPI(AHCIPort *port,int i)
+{
+   {
+      PhysicsPage *cmd = allocPages(0);
+      if(!cmd)
+         return -ENOMEM;
+      PhysicsPage *fis = allocPages(0);
+      if(!fis)
+         return (freePages(cmd,0),-ENOMEM);
+      PhysicsPage *table = allocPages(0); /*Alloc some pages.*/
+      if(!table)
+         return (freePages(cmd,0),freePages(fis,0),-ENOMEM);
+
+      port->fis = va2pa(getPhysicsPageAddress(fis));
+      port->commandList = va2pa(getPhysicsPageAddress(cmd));
+      port->interruptEnable = AHCI_PORT_ENABLE_IRQ;  /*Enable interrupts.*/
+      port->interruptStatus = 0;
+
+      AHCICommandHeader *header = (AHCICommandHeader *)getPhysicsPageAddress(cmd);
+      header->command = va2pa(getPhysicsPageAddress(table));
+   }
+
+   {
+      BlockDevice *block = &ahciBlockDevices[i];
+      block->read = 0; /*This port has not been registered.*/
+
+     /*Now we are going to send a PACKET IDENTIFY Command.*/
+      u8 *buffer = (u8 *)allocPages(0);
+      if(!buffer)
+         return ahciDisablePortATAPI(port,i); /*Alloc a buffer.*/
+      buffer = (u8 *)getPhysicsPageAddress((PhysicsPage *)buffer);
+
+      AHCICommandHeader *header = pa2va(port->commandList);
+      AHCICommandTable *table = pa2va(header->command);
+      AHCIHostToDeviceFIS *fis = (AHCIHostToDeviceFIS *)table->fis;
+      u64 __command = header->command;  /*Store the address.*/
+      Task *current = getCurrentTask();
+      void *data[] = {current,(void *)port};
+
+      memset(header,0,sizeof(*header));
+      header->command = __command; /*Restore the address.*/
+      header->length = sizeof(*fis) / sizeof(u32);
+      header->atapi = 0;
+      header->write = 0;  /*Read.*/
+      header->prdtl = 1;
+   
+      memset(table,0,sizeof(*table) + header->prdtl * sizeof(AHCIPrd));
+
+      fis->type = AHCI_FIS_H2D; /*Host To Device.*/
+      fis->cc = 1; /*Command.*/
+      fis->command = 0xa1; /*PACKET IDENTIFY Command.*/
+
+      table->prdt[0].interrupt = 1;
+      table->prdt[0].address = va2pa(buffer);
+      table->prdt[0].count = 128 * 4;
+
+      ahciStartCommand(port);
+
+      current->state = TaskStopping;
+      setIRQData(ahciIRQVector,data);
+      port->issue = 1; /*Send the command.*/
+      schedule(); /*Wait for an interrupt.*/
+      setIRQData(ahciIRQVector,0);
+
+      ahciStopCommand(port);
+     
+      switch((((u16 *)buffer)[0] & 0x1f00) >> 8)
+      {
+      case 0x5: /*CD-ROM.*/
+         block->write = 0;
+         block->read = &ahciRead;
+         block->type = BlockDeviceCDROM;
+         block->data = (void *)port;
+         block->end = (u64)-1;
+
+         registerBlockDevice(block,"cdrom"); /*Register the block device.*/
+         break;
+      default: /*Not CD-ROM,no support for it.*/
+         ahciDisablePortATAPI(port,i);
+         break;
+      }
+
+      freePages(getPhysicsPage(buffer),0); /*Free the buffer.*/
+   }
+   
    return 0;
 }
 
@@ -416,7 +475,6 @@ static int ahciDisable(Device *device)
       return 0;
 
    AHCIRegisters *ahci = ahciHBA;
-   ahciHBA = 0;
 
    for(int i = 0;i < AHCI_MAX_PORTS;++i)
    {
@@ -442,12 +500,16 @@ static int ahciDisable(Device *device)
    }
 
    ahci->hcontrol &= ~AHCI_GHC_ENABLE_IRQ; /*Disable interrupts.*/
+   memset(ahciBlockDevices,0,sizeof(ahciBlockDevices));
+   freeIRQ(ahciIRQVector);
+   ahciHBA = 0;
    return 0;
 }
 
 static int initAHCI(void)
 {
    ahciHBA = 0;
+   memset(ahciBlockDevices,0,sizeof(ahciBlockDevices));
    initSemaphore(&ahciSemaphore);
    registerDriver(&ahciDriver); /*Register the driver.*/
    return 0;

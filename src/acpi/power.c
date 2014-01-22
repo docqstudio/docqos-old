@@ -86,7 +86,7 @@ static int acpiPowerIRQ(IRQRegisters *reg,void *data)
 static int initAcpiPower(void)
 {
    if(!acpiFadt)
-      return -1;
+      return -ENODEV;
    u8 length = acpiFadt->eventRegister1Length;
    length /= 2;
    u32 enableRegister1a = acpiFadt->eventRegister1a + length;
@@ -111,7 +111,7 @@ int acpiEnable(const void *fadt,const void *ssdt)
    if(acpiFadt)
       return 0;
    if(!fadt)
-      return -1;
+      return -EINVAL;
    acpiFadt = (const ACPIFadt *)fadt;
    acpiDsdt = (const ACPIHeader *)pa2va(acpiFadt->dsdt);
    if(acpiFadt->smiCommandPort)
@@ -172,7 +172,7 @@ retry:;
          outw(acpiFadt->controlRegister1b,s5b | (1 << 13));
          /*Send soft off command.*/
    }
-   return -1;
+   return -ENODEV;
 }
 
 int doReboot(void)
@@ -189,7 +189,7 @@ next:
          inb(0x60);
       outb(0x64,0xfe); /*Send Reset CPU command.*/
    }
-   return -1;
+   return -ENODEV;
 }
 
 driverInitcall(initAcpiPower);

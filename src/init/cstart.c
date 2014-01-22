@@ -71,6 +71,7 @@ int kinit(void)
 
 int kmain(void)
 {
+   int retval;
    endAddressOfKernel = (void *)(&endAddressOfKernel + 1);
 
    initPaging();
@@ -83,23 +84,23 @@ int kmain(void)
 
    initGDT();
 
-   if(initMemory()) 
-      return -1; /*Error!*/
+   if((retval = initMemory()))
+      return retval; /*Error!*/
 
    displayCPUBrand();
 
    initDriver();
 
-   if(initACPI())
-      return -1;
+   if((retval = initACPI()))
+      return retval;
 
-   if(initInterrupt())
-      return -1;
+   if((retval = initInterrupt()))
+      return retval;
 
-   if(initTime())
-      return -1;
-   if(initLocalTime())
-      return -1;
+   if((retval = initTime()))
+      return retval;
+   if((retval = initLocalTime()))
+      return retval;
 
    initTask();
    return 0;

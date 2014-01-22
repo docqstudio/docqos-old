@@ -284,6 +284,8 @@ int doFork(IRQRegisters *regs,ForkFlags flags)
 
    Task *current = getCurrentTask();
    Task *new = allocTask((u64)retFromFork);
+   if(!new)
+      return -ENOMEM;
 
    new->activeMM = new->mm = 
       taskForkMemory(current->mm,flags);
@@ -327,7 +329,7 @@ failed:
    if(new->fs)
       taskExitFileSystem(new->fs);
    destoryTask(new); /*Destory the new task.*/
-   return -1;
+   return -ENOMEM;
 }
 
 int doExit(int n)
@@ -406,7 +408,7 @@ retry:;
    current->waiting = 0;
    current->state = TaskRunning;
    unlockSpinLock(&taskLock);
-   return -1;
+   return has ? -ETIMEDOUT : -ECHILD;
 wait:
    unlockSpinLock(&taskLock);
    schedule(); /*Wait for a zombie child.*/
@@ -416,6 +418,7 @@ wait:
 
 int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs)
 {
+   int ret = 0;
    u8 arguments[1024];
    int size = 0,i = 0,pos = 0;
    if(!argv) /*Are there any arguments?*/
@@ -443,14 +446,13 @@ int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters
 next:;
    Task *current = getCurrentTask();
    VFSFile *file = openFile(path);
-   if(!file)
-      return -1;
+   if(isErrorPointer(file))
+      return getPointerError(file);
    if(current->mm)
       taskExitMemory(current->mm);
    current->mm = taskForkMemory(0,ForkShareNothing);
    if(!current->mm)
       goto failed;
-   int ret;
    if(pos && i && size) /*There are arguments.*/
       ret = elf64Execve(file,arguments,pos,pos + size,regs);
    else
@@ -460,8 +462,8 @@ next:;
    closeFile(file);
    return 0;
 failed:
-   doExit(-1);
-   return -1;
+   doExit(ret);
+   return ret;
 }
 
 int createKernelTask(KernelTask task,void *arg)
@@ -490,7 +492,7 @@ int createKernelTask(KernelTask task,void *arg)
 int wakeUpTask(Task *task)
 {
    if(!task)
-      return -1;
+      return -EINVAL;
    task->state = TaskRunning;
    return 0;
 }

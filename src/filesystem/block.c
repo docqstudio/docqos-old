@@ -21,7 +21,7 @@ static int syncBlockDevice(void)
       if(doMount("/",0,part) == 0)
          return 0; /*Try to mount.*/
    }
-   return -1;
+   return -ENODEV;
 }
 
 int registerBlockDevice(BlockDevice *device,const char *devfs)
@@ -33,7 +33,7 @@ int registerBlockDevice(BlockDevice *device,const char *devfs)
          BlockDevicePart *part
             = kmalloc(sizeof(BlockDevicePart));
          if(!part)
-            return -1;
+            return -ENOMEM;
          part->next = 0;
          part->start = 0;
          part->end = device->end;
@@ -46,8 +46,9 @@ int registerBlockDevice(BlockDevice *device,const char *devfs)
       }
       break;
    case BlockDeviceDisk: /*No support.*/
+      return -ENOSYS;
    default:
-      return -1;
+      return -EINVAL;
    }
    listAddTail(&device->list,&blockDevices);
    if(devfs)
@@ -73,9 +74,9 @@ int submitBlockIO(BlockIO *io)
    u64 size = io->size;
    u64 pos = io->start + part->start;
    if(pos + size < pos || pos + size > device->end)
-      return -1;  
+      return -EINVAL;  
    if(pos < io->start || pos < part->start)
-      return -1;
+      return -EINVAL;
    int ret = (*device->read)(device->data,pos,size,io->buffer);
    return ret; /*There should have an IO scheduler.*/
                /*And a waitForBlockIO function.But we don't.*/

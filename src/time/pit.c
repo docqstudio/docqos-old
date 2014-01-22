@@ -34,7 +34,7 @@ int initPit(IRQHandler handler,unsigned int hz)
    {
       printkInColor(0xff,0x00,0x00,
          "Failed to initialize PIT!!!\n");
-      return -1;
+      return -EBUSY;
    }
    printk("Initialize PIT successfully!\n");
    return 0;

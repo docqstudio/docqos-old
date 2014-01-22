@@ -186,7 +186,7 @@ static int parseRSDP(u8 *rsdp)
    }
    if(sum)
    {
-      return -1;
+      return -EPROTO;
    }
    printkInColor(0x00,0xff,0x00,"ACPI is found!!\n");
 
@@ -213,7 +213,7 @@ static int parseRSDP(u8 *rsdp)
          parseRSDT((ACPIHeader *)pa2va(rsdt));
    }else{
       printkInColor(0xff,0x00,0x00,"\nUnknow ACPI's version!!!\n");
-      return -1;
+      return -EPROTONOSUPPORT;
    }
 
    printk("\n");
@@ -252,8 +252,6 @@ int initACPI(void)
       start += 0x10;
    }
    u8 *ebda = (u8 *)pa2va((*(u16 *)pa2va(0x40E)));
-   if(ebda != (u8 *)0x9FC00)
-      return -1;
    u8 * const ebdaEnd = ebda + 0x3FF;
    while(ebda < ebdaEnd){
       u64 signature = *(u64 *)ebda;
@@ -267,5 +265,5 @@ int initACPI(void)
    }
 
    printkInColor(0xff,0x00,0x00,"Can't find ACPI.\n");
-   return -1;
+   return -ENODEV;
 }

@@ -213,7 +213,7 @@ static int initKeyboard(void)
    /*Now we are sure that PS/2 keyboard is existed.*/
    /*Only check the first PS/2 port now.*/
    if(keyboardOut(KB_CMD_ESCAN) != KB_DATA_ACK)
-      return -1; /*Exist,but failed to init it.*/
+      return -EIO; /*Exist,but failed to init it.*/
 
    keyboardRead = keyboardWrite = 0;
    keyboardTask = 0;

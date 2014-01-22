@@ -44,23 +44,23 @@ static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount)
    for(;;io.start += 2048)
    {
       if(submitBlockIO(&io) < 0)
-         return -1;
+         return -EIO;
       /*Identifier is always "CD001".*/
       if(buffer[1] != 'C' ||
          buffer[2] != 'D' ||
          buffer[3] != '0' ||
          buffer[4] != '0' ||
          buffer[5] != '1' )
-         return -1;
+         return -EPROTO;
       if(buffer[0] == 0xff) /*Volume Descriptor Set Terminator.*/
-         return -1;
+         return -EPROTO;
       if(buffer[0] != 0x01) /*Primary Volume Descriptor.*/
          continue;
       break;
    }      
    /*Directory entry for the root directory.*/
    if(buffer[156] != 0x22)
-      return -1;
+      return -EPROTO;
    mount->root->type = VFSDentryDir;
    mount->root->name = "/";
    mount->root->inode->start = *(u32 *)(buffer + 156 + 2);
@@ -76,7 +76,7 @@ static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount)
 static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
 {
    if(dentry->type != VFSDentryDir)
-      return -1;
+      return -ENOTDIR;
    u8 buffer[2048];
    VFSINode *inode = dentry->inode;
    BlockIO io;
@@ -104,10 +104,10 @@ next:
       }
       if(needRead)
          if(submitBlockIO(&io))
-            return -1;
+            return -EIO;
       needRead = 0;
       if(buffer[pos + 0] == 0)/*No more.*/
-         return -1;
+         return -ENOENT;
       isDir = buffer[pos + 25] & 0x2; /*Is it a dir?*/
       u8 nameLength = buffer[pos + 32];
       if(!isDir)
@@ -160,19 +160,21 @@ static int iso9660Read(VFSFile *file,void *buf,u64 size)
    u64 seek = file->seek;
    BlockIO io;
    if(seek + size < seek) /*If too long,return.*/
-      return -1;
+      return -EINVAL;
    if(seek >= inode->size) /*If seek is not true,return.*/
-      return -1;
+      return -EBADFD;
    if(seek + size >= inode->size)
-      size = inode->size - seek; 
+      size = inode->size - seek - 1; 
       /*Just set it too max bytes we can read.*/
+   if(size == 0)
+      return 0;
    io.part = inode->part;
    io.start = inode->start + seek;
    io.size = size;
    io.read = 1;
    io.buffer = buf;
    if(submitBlockIO(&io)) /*Try to read.*/
-      return -1;
+      return -EIO;
    file->seek += size; /*Add for reading next time.*/
    return size; /*Return how many bytes we have read.*/
 }
@@ -181,7 +183,7 @@ static int iso9660LSeek(VFSFile *file,u64 offset)
 {
    VFSINode *inode = file->dentry->inode;
    if(offset >= inode->size)
-      return -1;
+      return -EINVAL;
    file->seek = offset;
    return offset;
 }

@@ -54,11 +54,10 @@ int initBuddySystem(void)
       initPhysicsPage(memoryMap + i);
    }
 
-   //printk("%x\n",endAddressOfKernel);
    endAddressOfKernel += physicsPageCount*sizeof(PhysicsPage) + 1;
    printk("The last physics page address: %x,the size of physics pages: %dKB.\n",
       endAddressOfKernel,
-      physicsPageCount*sizeof(PhysicsPage)/1024 + 1);
+      physicsPageCount * sizeof(PhysicsPage)/1024 + 1);
 
    printk("Initialize Buddy System successfully!\n");
    return 0;
@@ -71,9 +70,9 @@ int freePages(PhysicsPage *page,unsigned int order)
    PhysicsPage *targetPage = 0;
    PhysicsPage *buddy = 0;
    if(pageIndex < 0)
-      return -1; /*Error!*/
+      return -EINVAL; /*Error!*/
    if(page->flags & PageReserved)
-      return -1;
+      return -EPERM;
    if(--page->count)
       return 0;
    while(order < MAX_ORDER - 1)

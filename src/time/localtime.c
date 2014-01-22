@@ -56,13 +56,13 @@ int initLocalTime(void)
    if(!ticks)
    {
       printkInColor(0xff,0x00,0x00,"Local APIC Timer count too quick!!!\n");
-      return -1;
+      return -EOVERFLOW;
    }
    ticks = 0xffffff / ticks;
    if(!ticks)
    {
       printkInColor(0xff,0x00,0x00,"Local APIC Timer count too slow!!!!\n");
-      return -1;
+      return -EOVERFLOW;
    }
    printk("Ticks: %d\n",ticks);
 

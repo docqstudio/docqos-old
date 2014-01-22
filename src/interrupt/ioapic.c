@@ -56,7 +56,7 @@ static int ioApicSetIRQ(u8 irq,u8 interruptVector,u8 localApicID,u8 disable)
 int ioApicEnableIRQ(u8 irq)
 {
    if(irq >= irqCount)
-      return -1;
+      return -EINVAL;
    u32 data = ioApicIn(IOREDTBL + irq * 2); 
    data &= ~(1 << 16);
    ioApicOut(IOREDTBL + irq * 2,data);
@@ -66,7 +66,7 @@ int ioApicEnableIRQ(u8 irq)
 int ioApicDisableIRQ(u8 irq)
 {
    if(irq >= irqCount)
-      return -1;
+      return -EINVAL;
    u32 data = ioApicIn(IOREDTBL + irq * 2); 
    data |= (1 << 16);
    ioApicOut(IOREDTBL + irq * 2,data);
@@ -78,7 +78,7 @@ int initIOApic(void)
    if((ioApicAddress = getIOApicAddress()) == 0)
    {
       printkInColor(0xff,0x00,0x00,"Can't get I/O Apic Address!!!.");
-      return -1;
+      return -ENODEV;
    }
    u32 x = ioApicIn(IOAPICVER);
    int count = ((x >> 16) & 0xff) + 1;

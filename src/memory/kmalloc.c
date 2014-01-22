@@ -41,7 +41,7 @@ int initKMalloc(void)
       if(unlikely(!mallocSizes[i].cache))
       {
          printkInColor(0xff,0x00,0x00,"(%s) Can't get memorySize[%d].cache!",__func__,i);
-         return -1;
+         return -ENOMEM;
       }
    }
    return 0;
@@ -70,7 +70,7 @@ int kfree(const void *obj)
    if(!cache)
    {
       printkInColor(0xff,0x00,0x00,"(%s) Can't get the cache of the obj %x.",__func__,obj);
-      return -1;
+      return -EINVAL;
    }
 #endif
 

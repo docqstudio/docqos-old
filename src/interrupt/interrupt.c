@@ -57,16 +57,17 @@ int doIRQ(IRQRegisters *reg)
 
 int requestIRQ(u8 irq,IRQHandler handler)
 {
+   int retval;
    if(irq >= IRQ_COUNT)
-      return -1;
+      return -EINVAL;
    if(irqHandlerTable[irq].handler)
-      return -1;
+      return -EBUSY;
    irqHandlerTable[irq].handler = handler;
    irqHandlerTable[irq].data = 0;
-   if(ioApicEnableIRQ(irq))
+   if((retval = ioApicEnableIRQ(irq)))
    {
       irqHandlerTable[irq].handler = 0;
-      return -1; /*Can't enable this IRQ,restore irqHandlerTable.*/
+      return retval; /*Can't enable this IRQ,restore irqHandlerTable.*/
    }
    return 0;
 }
@@ -74,9 +75,9 @@ int requestIRQ(u8 irq,IRQHandler handler)
 int setIRQData(u8 irq,void *data)
 {
    if(irq >= IRQ_COUNT)
-      return -1;
+      return -EINVAL;
    if(!irqHandlerTable[irq].handler)
-      return -1;
+      return -ENOENT;
    irqHandlerTable[irq].data = data;
    return 0;
 }
@@ -84,7 +85,7 @@ int setIRQData(u8 irq,void *data)
 int freeIRQ(u8 irq)
 {
    if(irq >= IRQ_COUNT)
-      return -1;
+      return -EINVAL;
    irqHandlerTable[irq].handler = 0;
    irqHandlerTable[irq].data = 0;
    return ioApicDisableIRQ(irq);
@@ -94,12 +95,13 @@ int initInterrupt(void)
 {
    initIDT();
    initPIC(); /*In fact,it will disable PIC.*/
+   int retval;
 
-   if(initLocalApic())
-      return -1;
+   if((retval = initLocalApic()))
+      return retval;
 
-   if(initIOApic())
-      return -1;
+   if((retval = initIOApic()))
+      return retval;
 
    for(int i = 0;i < IRQ_COUNT;++i)
    {

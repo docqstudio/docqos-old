@@ -115,7 +115,7 @@ int initMemory(void)
       printkInColor(0xff,0x00,0x00,
       "(DEBUG) memoryInformationNumber = %d.\n",memoryInformationNumber);
 #endif /*CONFIG_DEBUG*/
-      return -1;
+      return -EINVAL;
    }
    memcpy((void *)memoryInformation, /*to*/
    (const void *)MEMORY_INFO_ADDRESS, /*from*/
