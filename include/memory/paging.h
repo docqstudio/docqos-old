@@ -1,5 +1,6 @@
 #pragma once
 #include <core/const.h>
+#include <task/semaphore.h>
 
 #define PAGE_OFFSET 0x8000000000
 #define PAGE_SIZE   0x1000
@@ -15,6 +16,24 @@
 
 
 typedef struct VFSFile VFSFile;
+typedef struct VirtualMemoryArea VirtualMemoryArea;
+
+typedef struct TaskMemory{
+   void *page;
+   AtomicType ref;
+   Semaphore *wait;
+
+   VirtualMemoryArea *vm;
+   VFSFile *exec;
+} TaskMemory;
+
+typedef struct VirtualMemoryArea {
+   VirtualMemoryArea *next;
+   VFSFile *file;
+   u64 offset;
+   u64 start;
+   u64 length;
+} VirtualMemoryArea;
 
 int doMMap(VFSFile *file,u64 offset,pointer address,u64 len);
 

@@ -17,6 +17,17 @@ typedef enum VFSDentryType{
    VFSDentryBlockDevice
 } VFSDentryType;
 
+typedef struct TaskFileSystem{
+   AtomicType ref;
+   VFSDentry *root;
+   VFSDentry *pwd;
+} TaskFileSystem;
+
+typedef struct TaskFiles{
+   AtomicType ref;
+   VFSFile *fd[TASK_MAX_FILES];
+} TaskFiles;
+
 typedef struct VFSFileOperation
 {
    int (*read)(VFSFile *file,void *buf,u64 size);
@@ -91,3 +102,5 @@ int readFile(VFSFile *file,void *buf,u64 size);
 int doWrite(int fd,const void *buf,u64 size);
 int closeFile(VFSFile *file);
 int lseekFile(VFSFile *file,u64 offset);
+
+VFSFile *cloneFile(VFSFile *file);

@@ -12,6 +12,10 @@ typedef struct VFSDentry VFSDentry;
 typedef struct VFSFile VFSFile;
 typedef struct Semaphore Semaphore;
 typedef struct Task Task;
+typedef struct VirtualMemoryArea VirtualMemoryArea;
+typedef struct TaskFileSystem TaskFileSystem;
+typedef struct TaskMemory TaskMemory;
+typedef struct TaskFiles TaskFiles;
 
 typedef enum ForkFlags{
    ForkShareNothing = 0,
@@ -27,23 +31,6 @@ typedef enum TaskState{
    TaskStopping,
    TaskZombie
 } TaskState;
-
-typedef struct TaskFileSystem{
-   AtomicType ref;
-   VFSDentry *root;
-   VFSDentry *pwd;
-} TaskFileSystem;
-
-typedef struct TaskFiles{
-   AtomicType ref;
-   VFSFile *fd[TASK_MAX_FILES];
-} TaskFiles;
-
-typedef struct TaskMemory{
-   void *page;
-   AtomicType ref;
-   Semaphore *wait;
-} TaskMemory;
 
 typedef struct Task{
    TaskState state;

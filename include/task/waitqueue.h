@@ -1,7 +1,7 @@
 #pragma once
 #include <core/const.h>
-#include <task/task.h>
 #include <core/list.h>
+#include <task/task.h>
 #include <cpu/spinlock.h>
 
 typedef struct WaitQueue{

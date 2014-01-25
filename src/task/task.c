@@ -453,15 +453,18 @@ next:;
    current->mm = taskForkMemory(0,ForkShareNothing);
    if(!current->mm)
       goto failed;
+   taskSwitchMemory(0,current->mm);
+   current->mm->exec = file;
    if(pos && i && size) /*There are arguments.*/
       ret = elf64Execve(file,arguments,pos,pos + size,regs);
    else
       ret = elf64Execve(file,0,0,0,regs); /*There aren't arguments.*/
    if(ret)
       goto failed;
-   closeFile(file);
    return 0;
 failed:
+   closeFile(file);
+   current->mm->exec = 0;
    doExit(ret);
    return ret;
 }

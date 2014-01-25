@@ -564,4 +564,15 @@ int taskExitFiles(TaskFiles *old,u8 share)
    return 0;
 }
 
+VFSFile *cloneFile(VFSFile *file)
+{
+   VFSFile *new = kmalloc(sizeof(*new));
+   if(unlikely(!new))
+      return 0;
+   new->dentry = vfsLookUpDentry(file->dentry);
+   new->operation = file->operation;
+   new->seek = file->seek;
+   return new;
+}
+
 subsysInitcall(initVFS);

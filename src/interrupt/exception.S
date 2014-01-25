@@ -6,15 +6,23 @@
 
 .macro exceptionWithoutErrorCode index
 exceptionHandler\index:
-   pushq $-1
-   pushq $\index
+   subq $8,%rsp
+   pushq %rax
+   movabs $(\index << 56),%rax
+   movq %rax,8(%rsp)
+   popq %rax
    jmp exception
 .endm
 .macro exceptionWithErrorCode index
 exceptionHandler\index:
-   pushq $\index
+   pushq %rax
+   movabs $(\index << 56),%rax
+   addq %rax,8(%rsp)
+   popq %rax
    jmp exception
 .endm
+
+.include "asm/calling.S"
 
 exceptionWithoutErrorCode 0
 exceptionWithoutErrorCode 1
@@ -38,21 +46,14 @@ exceptionWithoutErrorCode 18
 exceptionWithoutErrorCode 19
 
 exception:
-   pushq %rax
-   pushq %rbx
-   pushq %rcx
-   pushq %rdx
-   pushq %rbp
-   pushq %rsi
-   pushq %rdi
+   SAVE_ALL
 
+   movq %rsp,%rdi
    callq handleException
-   addq $(9*8),%rsp
-
-   cli
-1: /*label loop*/
-   hlt
-   jmp 1b
+   
+   RESTORE_ALL
+   addq $8,%rsp
+   iretq
 
 exceptionHandlers:
    .quad exceptionHandler0

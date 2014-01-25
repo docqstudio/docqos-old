@@ -6,6 +6,7 @@
 #include <lib/string.h>
 #include <filesystem/virtual.h>
 #include <task/semaphore.h>
+#include <interrupt/interrupt.h>
 
 #define MIN_MAPPING (1024ul*1024*1024*4) /*4GB.*/
 
@@ -229,6 +230,54 @@ static void *mmapPTECopier(void *data)
    return new;
 }
 
+static VirtualMemoryArea *lookForVirtualMemoryArea(
+                          TaskMemory *mm,u64 start)
+{ /*This function looks for the last VirtulMemoryArea that is before 'strart'.*/
+  /*This function will return 0 when 1. mm->vm == 0 .*/
+  /*                                 2. mm->vm->start + mm->vm->length > start .*/
+   VirtualMemoryArea *vma = mm->vm;
+   VirtualMemoryArea *prev = 0;
+   while(vma)
+   {
+      if(vma->start + vma->length > start)
+         break;
+      prev = vma;
+      vma = vma->next;
+   }
+   return prev;
+}
+
+static u64 lookForFreeVirtualMemoryArea(
+              TaskMemory *mm,u64 start,u64 length,VirtualMemoryArea **v)
+{
+   if(length > PAGE_OFFSET)
+      return -ENOMEM; /*Too large!*/
+   VirtualMemoryArea *vma;
+   if(start && start + length <= PAGE_OFFSET)
+   {
+      vma = lookForVirtualMemoryArea(mm,start);
+      if(!vma || !vma->next)
+         goto found;
+      if(vma->next->start >= start + length)
+         goto found;
+   }
+   start = 1024 * 1024 * 1024; /*Look from 1GB.*/
+   for(vma = lookForVirtualMemoryArea(mm,start);
+          start + length <= PAGE_OFFSET;vma = vma->next)
+   {
+      if(!vma || !vma->next)
+         goto found;
+      if(vma->next->start >= start + length) /*Is there enough free area?*/
+         goto found;
+      start = vma->next->start + vma->next->length;
+   }
+   return -ENOMEM;
+found:
+   if(v)
+      *v = vma;/*Save it to *v .*/
+   return start;
+}
+
 int initPaging(void)
 {
    calcMemorySize();
@@ -305,52 +354,30 @@ int initPaging(void)
 int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
 {
    Task *current = getCurrentTask();
-   void *pml4e;
-   PhysicsPage *page = 0;
-   pml4e = current->mm->page;
-   len = (len + 0xfff) & ~0xfff;
-   address &= ~0xfff;
-   if(address + len < address || address + len > PAGE_OFFSET)
-      return -EFAULT; /*Can't map kernel pages.*/
-   len >>= 12; /*Get pages which need map.*/
-   if(file)
-      if(lseekFile(file,offset) < 0)
-         return -EINVAL;
-   int retval;
-   while(len--)
+   TaskMemory *mm = current->mm;
+   VirtualMemoryArea *vma = 0;
+   u64 start = lookForFreeVirtualMemoryArea(mm,address,len,&vma);
+
+   if((s64)start < 0)
+      return (s64)start;
+   if(address && address != start)
+      return -EBUSY;
+   VirtualMemoryArea *new = kmalloc(sizeof(*new));
+   if(!new)
+      return -ENOMEM;
+   new->start = start;
+   new->length = len;
+   new->file = file;
+   new->offset = offset;
+   if(vma)
    {
-      page = allocPages(0);
-      retval = -ENOMEM;
-      if(!page)
-         goto failed;
-      void *data = getPhysicsPageAddress(page);
-      if(file)
-         if((retval = readFile(file,data,0x1000)) <= 0)
-            goto failed;
-      /*If file is null,map a page without data.*/
-      retval = -ENOMEM;
-      void *pdpte = allocPDPTE(pml4e,address);
-      if(!pdpte)
-         goto failed;
-      void *pde = allocPDE(pdpte,address);
-      if(!pde)
-         goto failed;
-      void *pte = allocPTE(pde,address);
-      if(!pte)
-         goto failed;
-      if((retval = setPTE(pte,address,va2pa(data))))
-         goto failed;
-      address += 0x1000; /*Next page.*/
+      new->next = vma->next;
+      vma->next = new;
+      return 0;
    }
-   asm volatile("movq %%rax,%%cr3"::"a"(va2pa(pml4e)));
-      /*Refresh TLBs.*/
+   new->next = mm->vm;
+   mm->vm = new;
    return 0;
-failed:
-   if(page)
-      freePages(page,0);
-   if(!retval)
-      retval = -EIO;
-   return retval;
 }
 
 int taskSwitchMemory(TaskMemory *old,TaskMemory *new)
@@ -379,7 +406,9 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
    atomicSet(&new->ref,1);
    new->page = 0;
    new->wait = 0;
-   
+   new->exec = 0;
+   new->vm = 0;
+
    u8 failed = 0;
    new->page = copyPML4E(old ? old->page : 0,&mmapPTECopier,&failed);
    if(failed || !new->page) /*If failed,return zero.*/
@@ -389,6 +418,41 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
       kfree(new);
       return 0;
    }
+   if(old)
+   {
+      new->exec = cloneFile(old->exec);
+      if(old->exec && !new->exec)
+      {
+         taskExitMemory(new);
+         return 0;
+      }
+      VirtualMemoryArea *vma,*nvma,**pvma;
+      vma = old->vm;
+      pvma = &new->vm;
+      while(vma)
+      {
+         nvma = kmalloc(sizeof(*nvma));
+         if(!nvma)
+         {
+            taskExitMemory(new);
+            return 0;
+         }
+         nvma->offset = vma->offset;
+         if(!vma->file)
+            nvma->file = 0;
+         else if(vma->file == old->exec)
+            nvma->file = new->exec;
+         else
+            nvma->file = cloneFile(vma->file);
+         nvma->start = vma->start;
+         nvma->length = vma->length;
+         nvma->next = 0;
+
+         *pvma = nvma;
+         pvma = &nvma->next;
+         vma = vma->next;
+      }
+   }
    return new;
 }
 
@@ -396,6 +460,7 @@ int taskExitMemory(TaskMemory *old)
 {
    int ref = atomicAddRet(&old->ref,-1);
    Semaphore *wait;
+   VirtualMemoryArea *vma,*__vma;
    switch(ref)
    {
    case 1:
@@ -406,10 +471,88 @@ int taskExitMemory(TaskMemory *old)
       break;
    case 0:
       freePML4E(old->page,&mmapPTEFreer);
+      vma = old->vm;
+      while(vma)
+      {
+         __vma = vma->next;
+         if(vma->file && vma->file != old->exec)
+            closeFile(vma->file);
+         kfree(vma);
+         vma = __vma;
+      }
+      if(old->exec)
+         closeFile(old->exec);
       kfree(old);
       break;
    default:
       break;
    }
    return 0;
+}
+
+int doPageFault(IRQRegisters *reg)
+{
+   u64 address,pos = 0;
+   VirtualMemoryArea *vma;
+   Task *current = getCurrentTask();
+   int retval;
+
+   asm volatile("movq %%cr2,%%rax":"=a"(address));
+                      /*Get the address which produces this exception.*/
+   if(!current->mm) /*Kernel Task!*/
+      return -ENOSYS;
+   if(address > PAGE_OFFSET)
+      return -EFAULT;
+   vma = lookForVirtualMemoryArea(current->mm,address);
+   if(!vma && current->mm->vm)
+      vma = current->mm->vm;
+   else if(!vma || !vma->next)
+      return -EFAULT;
+   else
+      vma = vma->next;
+
+   if(vma->start > address) /*Is the address in the VirtualMemoryArea?*/
+      return -EFAULT;
+
+   VFSFile *file = vma->file;
+   if(file)
+   {
+      pos = address & ~0xfff;
+      pos -= vma->start;
+      if(lseekFile(file,pos > 0 ? pos : -pos))
+         return -EIO;
+   }
+
+   void *pml4e = current->mm->page;
+   if(!pml4e)
+      current->mm->page = pml4e = allocPML4E();
+   if(!pml4e)
+      return -ENOMEM;
+   void *pdpte = allocPDPTE(pml4e,address);
+   if(!pdpte)
+      return -ENOMEM;
+   void *pde = allocPDE(pdpte,address);
+   if(!pde)
+      return -ENOMEM;
+   void *pte = allocPTE(pde,address);
+   if(!pte)
+      return -ENOMEM; /*Alloc page tables.*/
+
+   void *page = allocPages(0);
+   if(!page)
+      return -ENOMEM;
+   page = getPhysicsPageAddress((PhysicsPage *)page);
+   retval = -EIO;
+   if(file)
+      if(readFile(file,page + ((pos < 0) ? -pos : 0),0x1000 - ((pos < 0) ? -pos : 0)) < 0)
+         goto failed; /*Read data from the file!*/
+   retval = -EBUSY;
+   if(setPTE(pte,address,va2pa(page)) < 0)
+      goto failed;
+
+   asm volatile("movq %%rax,%%cr3"::"a"(va2pa(pml4e))); /*Refresh the TLBs.*/
+   return 0;
+failed:
+   freePages(getPhysicsPage(page),0);
+   return retval;
 }

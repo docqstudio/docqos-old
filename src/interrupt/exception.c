@@ -1,83 +1,102 @@
 #include <core/const.h>
 #include <lib/string.h>
 #include <video/console.h>
+#include <interrupt/interrupt.h>
+#include <cpu/io.h>
 
-typedef struct ExceptionRegisters
-{
-   u64 rdi,rsi,rbp,rbx,rdx,rcx,rax; /*Pushed after jmp exception.*/
-   u64 exceptionNumber; /*Pushed before jmp exception.*/
-   u64 errorCode; /*Maybe CPU pushed.*/
-   u64 rip,cs,rflags,rsp,ss; /*CPU pushed.*/
-} __attribute__ ((packed)) ExceptionRegisters;
+typedef int (*ExceptionHandler)(IRQRegisters *reg);
 
-int handleException(ExceptionRegisters regs) __attribute__((regparm(0)));
-int handleException(ExceptionRegisters regs)
+extern int doPageFault(IRQRegisters *reg);
+
+static ExceptionHandler doExceptions[20] =
 {
-   static const char *exceptionInformation[20] =
-   {
-       [0] = "Divide Error",
-       [1] = "Debug",
-       [2] = "Nonmaskable Interrupt",
-       [3] = "Breakpoint",
-       [4] = "Overflow",
-       [5] = "Bound Range Exceeded",
-       [6] = "Invalid Opcode",
-       [7] = "Device Not Available",
-       [8] = "Double Fault",
-       [9] = "Coprocessor Segment Overrun",
-       [10] = "Invalid TSS",
-       [11] = "Segment Not Present",
-       [12] = "Stack-Segment Fault",
-       [13] = "General Protection",
-       [14] = "Page Fault",
-       [16] = "Floating Point Error",
-       [17] = "Alignment Check",
-       [18] = "Machine Check",
-       [19] = "SIMD Exception"
-    };
+   [0 ... 13] = 0,
+   [14] = doPageFault,
+   [15 ... 19] = 0
+};
+
+static const char *exceptionInformation[20] =
+{
+    [0] = "Divide Error",
+    [1] = "Debug",
+    [2] = "Nonmaskable Interrupt",
+    [3] = "Breakpoint",
+    [4] = "Overflow",
+    [5] = "Bound Range Exceeded",
+    [6] = "Invalid Opcode",
+    [7] = "Device Not Available",
+    [8] = "Double Fault",
+    [9] = "Coprocessor Segment Overrun",
+    [10] = "Invalid TSS",
+    [11] = "Segment Not Present",
+    [12] = "Stack-Segment Fault",
+    [13] = "General Protection",
+    [14] = "Page Fault",
+    [16] = "Floating Point Error",
+    [17] = "Alignment Check",
+    [18] = "Machine Check",
+    [19] = "SIMD Exception"
+};
+
+int handleException(IRQRegisters *regs)
+{
+   u8 vector = (regs->irq >> 56) & 0xff;
+   const char *type;
    char buf[32];
    buf[0] = '0';
    buf[1] = 'x';
+
+   regs->irq &= 0x00fffffffffffffful;
+   if(vector < sizeof(doExceptions) / sizeof(doExceptions[0]))
+      if(doExceptions[vector])
+         if(!(*doExceptions[vector])(regs))
+            return 0;
+
+   closeInterrupt();
+   if(vector >= sizeof(exceptionInformation) / sizeof(exceptionInformation[0]))
+      type = "Unknow Type";
+   else
+      type = exceptionInformation[vector];
    printkInColor(0xff,0x00,0x00,"\n\nException!!!!!!! Type:%s\nRegisters:\n",
-      exceptionInformation[regs.exceptionNumber]);
+      type);
 
-#define _i(reg)                                       \
-do{                                                   \
-   itoa(regs.reg,buf + 2,0x10,16,'0',1);              \
-   printkInColor(0xff,0x00,0x00,#reg "=> %s ",buf);   \
-}while(0)
+#define printr(reg)                                       \
+   do{                                                    \
+      itoa(regs->reg,buf + 2,0x10,16,'0',1);               \
+      printkInColor(0xff,0x00,0x00,#reg "=> %s ",buf);    \
+   }while(0)
 
-   _i(rax);
-   _i(rbx);
-   _i(rcx);
-   _i(rdx);
+   printr(rax);
+   printr(rbx);
+   printr(rcx);
+   printr(rdx);
    printk("\n");
-   _i(rbp);
-   _i(rsi);
-   _i(rdi);
-   _i(rsp);
+   printr(rbp);
+   printr(rsi);
+   printr(rdi);
+   printr(rsp);
    printk("\n");
-   _i(rflags);
-   _i(rip);
-   printk("\n");
-
-#undef _i
-
-#define _i(reg) \
-do{                                                \
-itoa(regs.reg,buf + 2,0x10,4,'0',1);               \
-printkInColor(0xff,0x00,0x00, #reg "=> %s ",buf);  \
-}while(0)
-
-   _i(cs);
-   _i(ss);
+   printr(rflags);
+   printr(rip);
    printk("\n");
 
-#undef _i
+#undef printr
 
-   if(regs.errorCode != (u64)-1)
+#define printr(reg)                                      \
+   do{                                                   \
+      itoa(regs->reg,buf + 2,0x10,4,'0',1);               \
+      printkInColor(0xff,0x00,0x00, #reg "=> %s ",buf);  \
+   }while(0)
+
+   printr(cs);
+   printr(ss);
+   printk("\n");
+
+#undef printr
+
+   if(regs->irq)
    {
-      itoa(regs.errorCode,buf + 2,0x10,4,'0',1);
+      itoa(regs->irq,buf + 2,0x10,4,'0',1);
       printkInColor(0xff,0x00,0x00,"Error Code=> %s\n",buf);
    }
    for(;;);
