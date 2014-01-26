@@ -3,12 +3,16 @@
 #include <core/list.h>
 #include <cpu/spinlock.h>
 #include <cpu/atomic.h>
+#include <task/semaphore.h>
 
 typedef struct BlockDevicePart BlockDevicePart;
 typedef struct VFSINode VFSINode;
 typedef struct VFSFile VFSFile;
 typedef struct VFSDentry VFSDentry;
 typedef struct FileSystemMount FileSystemMount;
+typedef struct FileSystem FileSystem;
+
+typedef int (*VFSDirFiller)(void *data,u8 isDir,u64 length,const char *name);
 
 typedef enum VFSDentryType{
    VFSDentryFile,
@@ -30,9 +34,11 @@ typedef struct TaskFiles{
 
 typedef struct VFSFileOperation
 {
+   int (*readDir)(VFSFile *file,VFSDirFiller filler,void *data);
    int (*read)(VFSFile *file,void *buf,u64 size);
    int (*write)(VFSFile *file,const void *buf,u64 size);
    int (*lseek)(VFSFile *file,u64 offset);
+   int (*close)(VFSFile *file);
 } VFSFileOperation;
 
 typedef struct VFSINodeOperation
@@ -46,6 +52,7 @@ typedef struct VFSINodeOperation
 typedef struct VFSFile{
    VFSDentry *dentry;
    u64 seek;
+   void *data;
    VFSFileOperation *operation;
 } VFSFile;
 
@@ -73,17 +80,25 @@ typedef struct VFSINode{
 
    void *data;
    VFSINodeOperation *operation;
+   Semaphore semaphore;
 } VFSINode;
 
 typedef struct FileSystemMount{
    VFSDentry *parent;
    VFSDentry *root;
+
+   FileSystem *fs;
+   ListHead list;
+   AtomicType ref;
 } FileSystemMount;
 
 typedef struct FileSystem{
    int (*mount)(BlockDevicePart *part,FileSystemMount *mnt);
    ListHead list;
    const char *name;
+
+   ListHead mounts;
+   SpinLock lock;
 } FileSystem;
 
 int registerFileSystem(FileSystem *system);
@@ -96,6 +111,7 @@ int doClose(int fd);
 int doRead(int fd,void *buf,u64 size);
 int writeFile(VFSFile *file,const void *buf,u64 size);
 int doLSeek(int fd,u64 offset);
+int doGetDents64(int fd,void *data,u64 size);
 
 VFSFile *openFile(const char *path);
 int readFile(VFSFile *file,void *buf,u64 size);

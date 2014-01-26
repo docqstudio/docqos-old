@@ -18,3 +18,4 @@ int waitpid(int pid,int *result,int nowait);
 int reboot(unsigned long command);
 int getpid(void);
 int gettimeofday(unsigned long *time,void *unused);
+unsigned long getdents64(int fd,void *buf,unsigned long size);

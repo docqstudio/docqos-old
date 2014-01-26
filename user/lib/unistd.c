@@ -11,6 +11,7 @@
 #define __NR_reboot 0x8
 #define __NR_getpid 0x9
 #define __NR_gettimeofday 0xa
+#define __NR_getdents64 0xb
 
 #define __syscall0(ret,name)  \
    ret name(void) \
@@ -71,6 +72,6 @@ __syscall1(int,reboot,unsigned long,command);
 __syscall2(int,gettimeofday,unsigned long *,time,void *,unused);
 __syscall3(int,execve,const char *,path,const char **,argc,const char **,envp);
 __syscall3(unsigned long,read,int,fd,void *,buf,unsigned long,size);
+__syscall3(unsigned long,getdents64,int,fd,void *,buf,unsigned long,size);
 __syscall3(unsigned long,write,int,fd,const void *,buf,unsigned long,size);
 __syscall3(int,waitpid,int,pid,int *,result,int,nowait);
-

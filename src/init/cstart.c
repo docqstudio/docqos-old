@@ -64,7 +64,7 @@ int kinit(void)
       printkInColor(0x00,0xff,0x00,"Yes!\n\n");
    else
       printkInColor(0xff,0x00,0x00,"No!\n\n"); 
-
+   
    asm volatile("int $0xff"::"a"(0),"b"("/sbin/init"),"c"(0),"d"(0));
    for(;;);
 }

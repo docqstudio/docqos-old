@@ -5,7 +5,7 @@
  /*The memory that loader will be load.*/
 
 
-.set KERNEL_SIZE_SECTOR  , 0x40 /*The size of kernel.*/
+.set KERNEL_SIZE_SECTOR  , 0x50 /*The size of kernel.*/
 .set KERNEL_MEMORY_SEG   , 0x1000 /*The memory that kernel will load. (seg)*/
 .set KERNEL_MEMORY_OFF   , 0x0 /*The memory that kernel will load. (off)*/
 .set KERNEL_MEMORY       , KERNEL_MEMORY_SEG * 0x10 + KERNEL_MEMORY_OFF

@@ -8,6 +8,7 @@ static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
 static int iso9660Open(VFSDentry *dentry,VFSFile *file);
 static int iso9660Read(VFSFile *file,void *buf,u64 size);
 static int iso9660LSeek(VFSFile *file,u64 offset);
+static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data);
 
 static FileSystem iso9660FileSystem = {
    .mount = &iso9660Mount,
@@ -24,7 +25,9 @@ static VFSINodeOperation iso9660INodeOperation = {
 static VFSFileOperation iso9660FileOperation = {
    .read = &iso9660Read,
    .write = 0,
-   .lseek = &iso9660LSeek
+   .lseek = &iso9660LSeek,
+   .readDir = &iso9660ReadDir,
+   .close = 0
 };
 
 /*See also http://wiki.osdev.org/ISO_9660.*/
@@ -32,6 +35,7 @@ static VFSFileOperation iso9660FileOperation = {
 
 static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount)
 {
+   FileSystem *const fs = &iso9660FileSystem;
    u8 buffer[2048];
    BlockIO io;
    io.part = part;
@@ -70,6 +74,22 @@ static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount)
    mount->root->inode->inodeStart = io.start + 156 + 2;
    mount->root->inode->operation = &iso9660INodeOperation;
    mount->root->inode->part = part;
+
+   FileSystemMount *mnt = 0;
+   lockSpinLock(&fs->lock);
+   for(ListHead *list = fs->mounts.next;list != &fs->mounts;
+             list = list->next)
+   {
+      mnt = listEntry(list,FileSystemMount,list);
+      if(mnt->root->inode->part == part)
+         goto found;
+   }
+   unlockSpinLock(&fs->lock);
+   return 0;
+found:
+   atomicAdd(&mnt->root->ref,1);
+   unlockSpinLock(&fs->lock);
+   mount->root = mnt->root;
    return 0;
 }
 
@@ -186,6 +206,63 @@ static int iso9660LSeek(VFSFile *file,u64 offset)
       return -EINVAL;
    file->seek = offset;
    return offset;
+}
+
+static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)
+{
+   u8 buf[2048];
+   BlockIO io;
+   u64 pos = 0;
+   u8 needRead = 1;
+   u8 count = 0;
+   io.read = 1;
+   io.part = file->dentry->inode->part;
+   io.start = file->seek + file->dentry->inode->start;
+   io.size = sizeof(buf);
+   io.buffer = buf;
+   for(;;pos += buf[pos])
+   {
+      while(pos > 2048)
+         (pos -= 2048),(io.start += 2048),(needRead = 1);
+      if(needRead)
+         if(submitBlockIO(&io) < 0)
+            return -EIO; /*I/O Error!*/
+      if(buf[pos] == 0)
+         break;
+      switch(count++)
+      {
+      case 0:
+         (*filler)(data,1,1,".");
+         continue;
+      case 1:
+         (*filler)(data,1,2,"..");
+         continue;
+      default:
+         break;
+      }
+      u8 isDir = buf[pos + 25] & 0x2;
+      u8 length = buf[pos + 32];
+      if(!isDir)
+         length -= 2;
+      char *filename = (char *)&buf[pos + 33];
+      if((!isDir) && (filename[0] == '_'))
+         filename[0] = '.';
+      if((!isDir) && (filename[length - 1] == '.'))
+         filename[length - 1] = '\0';
+      else
+         filename[length] = '\0';  /*Set end.*/
+
+      /*To lower.*/
+      for(u64 i = 0;i < length;++i)
+         if((filename[i] <= 'Z') && (filename[i] >= 'A'))
+            filename[i] -= 'A' - 'a';/*Get the really filename.*/
+
+      if((*filler)(data,!!isDir,length,filename))
+         break; 
+   }
+   u64 old = file->seek;
+   file->seek = pos;
+   return pos - old;
 }
 
 static int initISO9660(void)

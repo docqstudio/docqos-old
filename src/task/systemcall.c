@@ -21,6 +21,7 @@ static u64 systemWaitPID(IRQRegisters *reg);
 static u64 systemReboot(IRQRegisters *reg);
 static u64 systemGetPID(IRQRegisters *reg);
 static u64 systemGetTimeOfDay(IRQRegisters *reg);
+static u64 systemGetDents64(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
    systemExecve, /*0*/
@@ -33,7 +34,8 @@ SystemCallHandler systemCallHandlers[] = {
    systemWaitPID,
    systemReboot,
    systemGetPID,
-   systemGetTimeOfDay /*10*/
+   systemGetTimeOfDay /*10*/,
+   systemGetDents64
 };
 
 static u64 systemOpen(IRQRegisters *reg)
@@ -104,6 +106,11 @@ static u64 systemGetPID(IRQRegisters *reg)
 static u64 systemGetTimeOfDay(IRQRegisters *reg)
 {
    return doGetTimeOfDay((u64 *)reg->rbx,(void *)reg->rcx);
+}
+
+static u64 systemGetDents64(IRQRegisters *reg)
+{
+   return doGetDents64((int)reg->rbx,(void *)reg->rcx,(u64)reg->rdx);
 }
 
 int doSystemCall(IRQRegisters *reg)
