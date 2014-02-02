@@ -1,6 +1,6 @@
 #include <core/const.h>
 #include <video/console.h>
-#include <video/vesa.h>
+#include <video/framebuffer.h>
 #include <lib/stdarg.h>
 #include <lib/string.h>
 
@@ -14,7 +14,7 @@ int printkInColor(u8 red,u8 green,u8 blue,const char *string, ...)
    varArgsStart(list,string);
    ret = (int)(vsprintk(buf,string,list) - buf);
    varArgsEnd(list);
-   writeStringInColor(red,green,blue,buf);
+   frameBufferWriteStringInColor(red,green,blue,buf);
    return ret;
 }
 
@@ -27,7 +27,7 @@ int printk(const char *string, ...)
    ret = (int)(vsprintk(buf,string,list) - buf);
    varArgsEnd(list);
 
-   writeString(buf);
+   frameBufferWriteString(buf);
    return ret;
 }
 char *vsprintk(char *buf,const char *string,VarArgsList list) 

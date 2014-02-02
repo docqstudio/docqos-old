@@ -86,6 +86,7 @@ typedef struct IDEInterruptWait{
 
 /*IDE status register.*/
 #define IDE_STATUS_BUSY              0x80
+#define IDE_STATUS_READY             0x40
 #define IDE_STATUS_DRQ               0x08
 #define IDE_STATUS_ERROR             0x01
 
@@ -237,7 +238,10 @@ static int ideWaitReady(u8 device)
 {
    u8 status;
    
-   for(;;){
+   for(int i = 0;i < 5;++i)
+      ideInb(device,IDE_REG_STATUS);
+   for(;;)
+   {
       status = ideInb(device,IDE_REG_STATUS);
       if(!(status & IDE_STATUS_BUSY))
          break;
@@ -250,15 +254,16 @@ static int ideWaitReady(u8 device)
 static int ideWaitDRQ(u8 device)
 {
    u8 error = 0;
+   for(int i = 0;i < 5;++i)
+      ideInb(device,IDE_REG_STATUS);
    for(;;)
    {
       u8 status = ideInb(device,IDE_REG_STATUS);
-      if(status & IDE_STATUS_ERROR) /*Error?*/
-      {
-         error = 1;
+         /*If the busy bit is set,no other bits are available.*/
+      if(!(status & IDE_STATUS_BUSY) && (status & IDE_STATUS_ERROR)
+         && (error = 1)) /*Error?*/
          break;
-      }
-      if((!(status & IDE_STATUS_BUSY)) && (status & IDE_STATUS_DRQ))
+      if(!(status & IDE_STATUS_BUSY) && (status & IDE_STATUS_DRQ))
          break;
       schedule(); /*Give time to other tasks.*/
    }
@@ -276,8 +281,8 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
    u8 irq = 
       (primary == IDE_PRIMARY) ? IDE_PRIMARY_IRQ : IDE_SECONDARY_IRQ;
 
-   dma &= device->dma;
-   
+   dma = (dma && device->dma);
+
    downSemaphore(&ideSemaphores[primary]);
 
    /*Setup DMA.*/
@@ -304,6 +309,7 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
    ideWaitReady(primary);
    ideOutb(primary,IDE_REG_DEV_SEL,(master << 4) | 0xa0);
    ideWaitReady(primary);
+   
    if(!dma)
    {
       ideOutb(primary,IDE_REG_FEATURES,0x0); /*PIO Mode.*/
@@ -533,13 +539,37 @@ static int ideEnable(Device *device)
       return -EBUSY;
    PCIDevice *pci = containerOf(device,PCIDevice,globalDevice);
 
-   ports[IDE_PRIMARY  ].base = pci->bar[0] ? : 0x1f0;
-   ports[IDE_PRIMARY  ].ctrl = pci->bar[1] ? : 0x3f4;
+   ports[IDE_PRIMARY  ].base = pci->bar[0] ? (pci->bar[0] & 0xfffffffc) : 0x1f0;
+   ports[IDE_PRIMARY  ].ctrl = pci->bar[1] ? (pci->bar[1] & 0xfffffffc) : 0x3f4;
    ports[IDE_PRIMARY  ].busMasterIDE = (pci->bar[4] & 0xfffffffc) + 0;
 
-   ports[IDE_SECONDARY].base = pci->bar[2] ? : 0x170;
-   ports[IDE_SECONDARY].ctrl = pci->bar[3] ? : 0x374;
+   ports[IDE_SECONDARY].base = pci->bar[2] ? (pci->bar[2] & 0xfffffffc) : 0x170;
+   ports[IDE_SECONDARY].ctrl = pci->bar[3] ? (pci->bar[3] & 0xfffffffc) : 0x374;
    ports[IDE_SECONDARY].busMasterIDE = (pci->bar[4] & 0xfffffffc) + 8;
+
+   for(int i = 0;i < 3;++i)
+   {
+      if(i == 2)
+         return -ENODEV;
+      for(int j = IDE_REG_DATA;j < IDE_REG_STATUS;++j)
+         if(ideInb(IDE_PRIMARY,j) != 0xff)
+            goto pnext;
+      ports[IDE_PRIMARY].base = 0x1f0;
+      ports[IDE_PRIMARY].ctrl = 0x3f4;
+   }
+
+pnext:
+   for(int i = 0;i < 3;++i)
+   {
+      if(i == 2)
+         return -ENODEV;
+      for(int j = IDE_REG_DATA;j < IDE_REG_STATUS;++j)
+         if(ideInb(IDE_SECONDARY,j) != 0xff)
+            goto snext;
+      ports[IDE_SECONDARY].base = 0x170;
+      ports[IDE_SECONDARY].ctrl = 0x374;
+   }
+snext:
 
    requestIRQ(IDE_PRIMARY_IRQ,&ideIRQPrimary);
    requestIRQ(IDE_SECONDARY_IRQ,&ideIRQSecondary); 
@@ -587,6 +617,8 @@ static int ideEnable(Device *device)
             else /*It is not an atapi device.*/
                continue;
             type = IDEDeviceTypeATAPI;
+
+            ideWaitReady(i);
             ideOutb(i,IDE_REG_COMMAND,IDE_CMD_IDENTIFY_PACKET); 
             error = ideWaitDRQ(i); /*Wait DRQ again.*/
             if(error)
@@ -598,7 +630,8 @@ static int ideEnable(Device *device)
          ideDevices[i][j].prdt = allocDMAPages(0,32);
          ideParseIdentifyData(&ideDevices[i][j],type,buf);
             /*Read and parse it.*/
-         if(ideDevices[i][j].subType == IDEDeviceSubTypeCDROM)
+         if(ideDevices[i][j].type == IDEDeviceTypeATAPI &&
+            ideDevices[i][j].subType == IDEDeviceSubTypeCDROM)
          {
             BlockDevice *block = &ideDevices[i][j].block;
             block->write = 0;
@@ -703,6 +736,8 @@ static int ideIRQSecondary(IRQRegisters *reg,void *data)
 
 static int initIDE(void)
 {
+   memset(ports,0,sizeof(ports));
+   ports[0].base = 0;
    for(int i = 0;i < sizeof(ideSemaphores) / sizeof(ideSemaphores[0]);++i)
       initSemaphore(&ideSemaphores[i]);
    registerDriver(&ideDriver);

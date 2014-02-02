@@ -1,7 +1,7 @@
 #include <core/const.h>
 #include <filesystem/virtual.h>
 #include <filesystem/devfs.h>
-#include <video/vesa.h>
+#include <video/framebuffer.h>
 #include <cpu/io.h>
 #include <lib/string.h>
 
@@ -26,7 +26,7 @@ static TTYReader ttyReader;
 
 static int ttyWrite(VFSFile *file,const void *buf,u64 size)
 {
-   writeString((const char *)buf); /*Ingore size.*/
+   frameBufferWriteString((const char *)buf); /*Ingore size.*/
    return 0;
 }
 
@@ -89,7 +89,7 @@ int ttyKeyboardPress(char i)
       goto wakeUp;
 out:
    unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   writeString(string);
+   frameBufferWriteString(string);
    return 0;
 ret:
    unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
@@ -99,9 +99,9 @@ wakeUp:
    unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
    string[0] = i;
    if(i != '\n')
-      writeString(string);
+      frameBufferWriteString(string);
    string[0] = '\n';
-   writeString(string);
+   frameBufferWriteString(string);
    wakeUpTask(ttyReader.reader); /*Wake up the reader!*/
    return 0;
 }

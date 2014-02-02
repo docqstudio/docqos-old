@@ -80,7 +80,7 @@ static int destorySlab(SlabCache *cache,Slab *slab)
 {
    void *obj = (void *)slab;
    PhysicsPage *memoryMap = getMemoryMap();
-   PhysicsPage *page = memoryMap + (((u64)(obj)) >> (4*3));
+   PhysicsPage *page = memoryMap + (((u64)(obj)) >> (4 * 3));
 
    cache->freeObjCount -= cache->perSlabObjCount;
    listDelete(&slab->list);
@@ -95,13 +95,13 @@ static SlabCache *initSlabCache(SlabCache *cache,u32 objSize,u32 objCount,
    initList(&cache->slabPartial);
    initList(&cache->slabFull);
 
-   u32 objDescriptorSize = objCount*sizeof(SlabObjDescriptor);
+   u32 objDescriptorSize = objCount * sizeof(SlabObjDescriptor);
    u32 slabSize = objDescriptorSize + sizeof(Slab);
    u32 slabPage,slabOrder;
 
    slabPage = slabSize + objSize * objCount;
    slabPage += 0xfff;
-   slabPage >>= 3*4; 
+   slabPage >>= 3 * 4; 
 
    for(slabOrder = 0;slabOrder < 11;++slabOrder)
       if((1ul << slabOrder) >= slabPage)
@@ -113,7 +113,7 @@ static SlabCache *initSlabCache(SlabCache *cache,u32 objSize,u32 objCount,
    cache->freeObjCount = 0;
    cache->slabSize = slabSize;
    cache->localCache[0] = localCache;
-   cache->freeLimit = cache->perSlabObjCount + 2*cache->localCache[0]->batchCount;
+   cache->freeLimit = cache->perSlabObjCount + 2 * cache->localCache[0]->batchCount;
 
    return cache;
 }

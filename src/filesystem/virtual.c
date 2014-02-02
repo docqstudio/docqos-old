@@ -80,7 +80,7 @@ static int destoryFileSystemMount(FileSystemMount *mnt)
 static int vfsLookUpClear(VFSDentry *dentry)
 {
    VFSDentry *parent;
-   while(dentry)
+   while(dentry->parent)
    {
       while((parent = dentry->parent))
       {
@@ -96,20 +96,21 @@ static int vfsLookUpClear(VFSDentry *dentry)
          unlockSpinLock(&parent->lock);
          dentry = parent;
       }
-      if(dentry->mnt->parent)
-         lockSpinLock(&dentry->mnt->parent->lock);
+      if(dentry->mnt->point->parent)
+         lockSpinLock(&dentry->mnt->point->parent->lock);
       atomicAdd(&dentry->mnt->ref,-1); /*It should never be 0.*/
-      if(dentry->mnt->parent)
-         unlockSpinLock(&dentry->mnt->parent->lock);
-      dentry = dentry->mnt->parent;
+      if(dentry->mnt->point->parent)
+         unlockSpinLock(&dentry->mnt->point->parent->lock);
+      dentry = dentry->mnt->point;
    }
+   atomicAdd(&dentry->ref,0);
    return 0;
 }
 
 static VFSDentry *vfsLookUpDentry(VFSDentry *dentry)
 {
    VFSDentry *child = dentry,*parent;
-   while(child)
+   while(child->parent)
    {
       while((parent = child->parent))
       {
@@ -118,13 +119,14 @@ static VFSDentry *vfsLookUpDentry(VFSDentry *dentry)
          unlockSpinLock(&parent->lock);
          child = parent;
       }
-      if(child->mnt->parent)
-         lockSpinLock(&child->mnt->parent->lock);
+      if(child->mnt->point->parent)
+         lockSpinLock(&child->mnt->point->parent->lock);
       atomicAdd(&child->mnt->ref,1); /*Add the reference count,too!*/
-      if(child->mnt->parent)
-         unlockSpinLock(&child->mnt->parent->lock);
-      child = child->mnt->parent;
+      if(child->mnt->point->parent)
+         unlockSpinLock(&child->mnt->point->parent->lock);
+      child = child->mnt->point;
    }
+   atomicAdd(&dentry->ref,1);
    return dentry;
 }
 
@@ -167,7 +169,7 @@ static VFSDentry *vfsLookUp(const char *__path)
          { /*Now there are two logical possiblities:*/
            /*1. The 'dentry' is the root dentry.*/
            /*2. The 'dentry' is the root dentry for a FileSystemMount.*/
-            parent = ret->mnt->parent;
+            parent = ret->mnt->point->parent;
             if(!parent)  /*The first possiblity,just goto next.*/
                goto next;
             FileSystemMount *mnt = ret->mnt;
@@ -195,8 +197,6 @@ static VFSDentry *vfsLookUp(const char *__path)
          { /*Search ret->children.*/
             atomicAdd(&dentry->ref,1);
             const VFSDentryType type = dentry->type;
-            if(type == VFSDentryDir)
-               goto nextUnlock;
             if(type == VFSDentryMount)
             { /*A mount point!*/
                FileSystemMount *mnt = dentry->mnt;
@@ -206,6 +206,8 @@ static VFSDentry *vfsLookUp(const char *__path)
                ret = dentry;
                goto next;
             }
+            if(type == VFSDentryDir)
+               goto nextUnlock;
             unlockSpinLock(&ret->lock);
             ret = dentry;
             goto failed;
@@ -241,8 +243,30 @@ next:
     /*Last.*/
    if(path[0] == '.' && path[1] == '\0')
       return ret;
-   if(path[1] == '.' && path[1] == '.' && path[2] == '\n')
-      return ret->parent ? : ret->mnt->parent;
+   if(path[0] == '.' && path[1] == '.' && path[2] == '\0')
+   {
+      VFSDentry *parent = ret->parent;
+      if(!parent)
+      {
+         parent = ret->mnt->point->parent;
+         if(!parent)
+            return ret;
+         lockSpinLock(&parent->lock);
+         atomicAdd(&ret->mnt->ref,-1);
+         unlockSpinLock(&parent->lock);
+         return parent;
+      }
+      lockSpinLock(&parent->lock);
+      if(atomicAdd(&ret->ref,-1) == 0)
+      {
+         listDelete(&ret->list);
+         unlockSpinLock(&parent->lock);
+         destoryDentry(ret);
+         return parent;
+      }
+      unlockSpinLock(&parent->lock);
+      return parent;
+   }
    int pathLength = strlen(path);
    lockSpinLock(&ret->lock);
    for(ListHead *list = ret->children.next;list != &ret->children;list = list->next)
@@ -511,7 +535,7 @@ int doUMount(const char *point)
    ret = -EINVAL;
    if(dentry->parent)
       goto out;
-   dentry = dentry->mnt->parent;
+   dentry = dentry->mnt->point;
    ret = -EBUSY;
    lockSpinLock(&dentry->parent->lock);
    if(atomicRead(&dentry->mnt->ref) > 1)
@@ -563,7 +587,7 @@ found:
       goto failed;
    if(point[0] == '/' && point[1] == '\0')
    {
-      mnt->parent = 0;
+      mnt->point = mnt->root;
       mnt->root->parent = 0; /*No parents.*/
       mnt->root->mnt = mnt;
       doChroot(mnt); /*Call chroot.*/
@@ -572,7 +596,7 @@ found:
    VFSDentry *dentry = vfsLookUp(point);
    if(!dentry) /*Find the dentry of the mount point.*/
       goto failed;
-   mnt->parent = dentry;
+   mnt->point = dentry;
    mnt->root->parent = 0; 
    mnt->root->mnt = mnt;
    if(!dentry->parent)

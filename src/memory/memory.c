@@ -6,6 +6,7 @@
 #include <memory/kmalloc.h>
 #include <memory/paging.h>
 #include <video/console.h>
+#include <init/multiboot.h>
 
 /*Saved in loader.*/
 #define MEMORY_INFO_NUMBER_ADDRESS (0x70000ul + PAGE_OFFSET)
@@ -14,25 +15,22 @@
 
 extern void *endAddressOfKernel; /*Defined in ldscripts/kernel.lds.*/
 
-static MemoryARDS memoryInformation[MEMORY_INFO_MAX_NUMBER] = {};
-static u32 memoryInformationNumber = 0;
+static MultibootTagMemoryMap *memoryMap;
 static u64 memorySize = 0;
 
 static int parseMemoryInformation(void)
 {
    u32 startPageIndex,endPageIndex;
    u64 base,limit;
-   PhysicsPage *memoryMap = getMemoryMap();
+   PhysicsPage *__memoryMap = getMemoryMap();
    pointer endOfKernel = (pointer)endAddressOfKernel;
    endOfKernel = va2pa(endOfKernel);
-   for(int i = 0;i < memoryInformationNumber; ++i)
+   for(int i = 0;i < memoryMap->count; ++i)
    {
-      base = (u64)(memoryInformation[i].baseAddrLow);
-      base |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);  
-      limit = (u64)(memoryInformation[i].lengthLow);
-      limit |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);
+      base = memoryMap->entries[i].address;
+      limit = memoryMap->entries[i].length;
       limit += base;
-      if(memoryInformation[i].type != 0x1)
+      if(memoryMap->entries[i].type != 0x1)
          continue;
       if(limit < endOfKernel)
          continue;
@@ -42,7 +40,7 @@ static int parseMemoryInformation(void)
       endPageIndex = ((limit + 0xfff) >> (3*4)) - 1;
       for(int j = startPageIndex;j < endPageIndex;++j)
       {
-         freePages(memoryMap + j,0);
+         freePages(__memoryMap + j,0);
       }
    }
    return 0;
@@ -56,13 +54,11 @@ static int displayMemoryInformation(void)
    buf[0] = '0';buf[1] = 'x';
    printk("\nDisplaying memory information...\n");
    printkInColor(0x00,0xFF,0x00,"Base Address:      Limit:             Type:\n");
-   for(int i = 0;i < memoryInformationNumber; ++i)
+   for(int i = 0;i < memoryMap->count; ++i)
    {
-      base = (u64)(memoryInformation[i].baseAddrLow);
-      base |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);
-      limit = (u64)(memoryInformation[i].lengthLow);
-      limit |= ((u64)(memoryInformation[i].baseAddrHigh) << 32);
-      type = memoryInformation[i].type;
+      base = memoryMap->entries[i].address;
+      limit = memoryMap->entries[i].length;
+      type = memoryMap->entries[i].type;
       itoa(base,buf + 2,0x10,16,'0',1);
       printk("%s ",buf);
       itoa(limit,buf + 2,0x10,16,'0',1);
@@ -78,19 +74,17 @@ static int displayMemoryInformation(void)
    return 0;
 }
 
-int calcMemorySize(void)
+int calcMemorySize(MultibootTagMemoryMap *map)
 {
-   u32 count = *(u32 *)(MEMORY_INFO_NUMBER_ADDRESS);
-   MemoryARDS *ards = (MemoryARDS *)(MEMORY_INFO_ADDRESS);
    u64 base,limit,temp;
    u32 type;
-   for(int i = 0;i < count;++i)
+
+   map->count = (map->tag.size - sizeof(*map)) / map->count;
+   for(int i = 0;i < map->count;++i)
    {
-      base = (u64)(ards[i].baseAddrLow);
-      base |= ((u64)(ards[i].baseAddrHigh) << 32);
-      limit = (u64)(ards[i].lengthLow);
-      limit |= ((u64)(ards[i].baseAddrHigh) << 32);
-      type = ards[i].type;
+      base = map->entries[i].address;
+      limit = map->entries[i].length;
+      type = map->entries[i].type;
       if(type == 0x1)
       {
          temp = base + limit;
@@ -98,29 +92,12 @@ int calcMemorySize(void)
             memorySize = temp;
       }
   }
+  memoryMap = map;
   return 0;
 }
 
 int initMemory(void)
 {
-   memoryInformationNumber =
-         *(u32 *)(MEMORY_INFO_NUMBER_ADDRESS);
-   /*After this ,memoryInformationNumber shoudn't be changed.*/
-   if((memoryInformationNumber == 0) ||
-      (memoryInformationNumber > MEMORY_INFO_MAX_NUMBER))
-   {
-      printkInColor(0xff,0x00,0x00, /*Red.*/
-      "Memory information is too much or few!\n");
-#ifdef CONFIG_DEBUG
-      printkInColor(0xff,0x00,0x00,
-      "(DEBUG) memoryInformationNumber = %d.\n",memoryInformationNumber);
-#endif /*CONFIG_DEBUG*/
-      return -EINVAL;
-   }
-   memcpy((void *)memoryInformation, /*to*/
-   (const void *)MEMORY_INFO_ADDRESS, /*from*/
-   memoryInformationNumber * sizeof(MemoryARDS) /*n*/);
-
    displayMemoryInformation();
    initBuddySystem();
    parseMemoryInformation();

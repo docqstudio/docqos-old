@@ -166,7 +166,7 @@ int initGDT(void)
       : "a" ((u64)SELECTOR_TSS)
    ); /*Load TSS.*/
 
-   printkInColor(0x00,0xff,0x00,"Initialize GDT successfully!!");
+   printkInColor(0x00,0xff,0x00,"Initialize GDT successfully!!\n");
 
    return 0;
 }

@@ -1,5 +1,5 @@
 #include <core/const.h>
-#include <video/vesa.h>
+#include <video/framebuffer.h>
 #include <video/console.h>
 #include <memory/memory.h>
 #include <memory/paging.h>
@@ -8,6 +8,7 @@
 #include <cpu/gdt.h>
 #include <acpi/acpi.h>
 #include <interrupt/interrupt.h>
+#include <interrupt/idt.h>
 #include <time/time.h>
 #include <time/localtime.h>
 #include <task/task.h>
@@ -15,11 +16,14 @@
 #include <driver/driver.h>
 #include <driver/pci.h>
 #include <filesystem/virtual.h>
+#include <init/multiboot.h>
 
 extern void *endAddressOfKernel;
 
 extern InitcallFunction initcallStart;
 extern InitcallFunction initcallEnd;
+
+extern int calcMemorySize(MultibootTagMemoryMap *map);
 
 static int doInitcalls(void)
 {
@@ -69,20 +73,58 @@ int kinit(void)
    for(;;);
 }
 
-int kmain(void)
+int kmain(u64 magic,u8 *address)
 {
+   MultibootTagFrameBuffer *fb = 0;
+   MultibootTagMemoryMap *mmap = 0;
    int retval;
    endAddressOfKernel = (void *)(&endAddressOfKernel + 1);
 
+   if(magic != MULTIBOOT2_BOOTLOADER_MAGIC)
+      return -EINVAL;
+
+   memcpy((void *)endAddressOfKernel,(const void *)address,*(u32 *)address);
+   address = (u8 *)endAddressOfKernel;   /*Copy the information.*/
+   endAddressOfKernel += *(u32 *)address;
+
+   for(MultibootTag *__tag = (MultibootTag *)(address + 8);
+      __tag->type != MULTIBOOT2_TAG_TYPE_END;
+      __tag = (MultibootTag *)((u8 *)__tag + ((__tag->size + 7) & ~7)))
+   {
+      switch(__tag->type)
+      {
+      case MULTIBOOT2_TAG_TYPE_FRAMEBUFFER:
+         {
+            MultibootTagFrameBuffer *tag
+               = (MultibootTagFrameBuffer *)__tag;
+            fb = tag;
+         }
+         break;
+      case MULTIBOOT2_TAG_TYPE_MEMORYMAP:
+         {
+            MultibootTagMemoryMap *tag
+               = (MultibootTagMemoryMap *)__tag;
+            mmap = tag;
+         }
+      default:
+         break;
+      }
+   }
+
+   if(!fb || !mmap)    /*return if there is no enough information.*/
+      return -EINVAL;
+
+   calcMemorySize(mmap);
    initPaging();
 
-   initVESA(); /*Init vesa.*/
+   initFrameBuffer(fb); /*Init Frame Buffer..*/
  
    printkInColor(0x00,0xFF,0x00, /*Green.*/
       "------------------kmain started------------------\n");
    printk("Initialize VESA successfully.\n");
 
    initGDT();
+   initIDT();
 
    if((retval = initMemory()))
       return retval; /*Error!*/
@@ -90,7 +132,7 @@ int kmain(void)
    displayCPUBrand();
 
    initDriver();
-
+   
    if((retval = initACPI()))
       return retval;
 

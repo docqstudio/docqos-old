@@ -9,7 +9,7 @@ dir_user:
 	cd user && $(MAKE) -f Makefile
 
 $(ISO):bin bin/* bin/*/*
-	$(MKISO) $(MKISOFLAGS) -o os.iso bin
+	$(MKRESCUE) -o $(ISO) $(ROOT)/bin
 
 qrun:first
 	$(QEMU) $(QEMUFLAGS)

@@ -18,10 +18,11 @@
 #define HPET_CONF_ENABLE          0x01
 #define HPET_CONF_ENABLE_INT      0x02
 
-#define HPET_TIMER_CONF_ENABLE    0x04
-#define HPET_TIMER_CONF_PERIODIC  0x08
-#define HPET_TIMER_CONF_PER_CAP   0x10
-#define HPET_TIMER_CONF_SET_VAL   0x40
+#define HPET_TIMER_CONF_ENABLE    0x004
+#define HPET_TIMER_CONF_PERIODIC  0x008
+#define HPET_TIMER_CONF_PER_CAP   0x010
+#define HPET_TIMER_CONF_SET_VAL   0x040
+#define HPET_TIMER_CONF_32BIT     0x100
 
 #define HPET_PERIOD_REG           0x04
 #define HPET_CONF_REG             0x10
@@ -123,20 +124,25 @@ static inline int disableHpetInterrupt(void)
 
 static inline int hpetStartTimer(int index,int periodic,u32 time)
 {
+   disableHpet();
    u32 conf = hpetIn(HPET_TIMER_CONF_REG(index));
+   u32 counter = hpetIn(HPET_COUNTER_REG_LOW);
    if(periodic)
    {
       if(conf & HPET_TIMER_CONF_PER_CAP) /*Check support for periodic mode.*/
          conf |= HPET_TIMER_CONF_PERIODIC;
       else
-         return -EPROTONOSUPPORT;
-   }else{
-      conf &= ~HPET_TIMER_CONF_PERIODIC;
+         return (enableHpet(),-EPROTONOSUPPORT);
    }
    conf |= (HPET_TIMER_CONF_ENABLE | HPET_TIMER_CONF_SET_VAL);
+   conf |= HPET_TIMER_CONF_32BIT;
    hpetOut(HPET_TIMER_CONF_REG(index),conf);
-   hpetOut(HPET_TIMER_CMP_REG(index),time); 
+   hpetOut(HPET_TIMER_CMP_REG(index),time + counter); 
+   for(volatile int i = 0;i < 100000;++i)
+      ; /*Wait a minute.*/
+   hpetOut(HPET_TIMER_CMP_REG(index),time);
    /*We must first "hpetOut" conf,then "hpetOut" time.Or it won't work true.*/
+   enableHpet();
    return 0;
 }
 

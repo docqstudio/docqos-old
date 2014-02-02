@@ -280,20 +280,24 @@ found:
 
 int initPaging(void)
 {
-   calcMemorySize();
-
    u64 mappingSize = getMemorySize();
    if(mappingSize < MIN_MAPPING)
       mappingSize = MIN_MAPPING;
-   u64 pdeCount = mappingSize / (1024*1024*2); /*2MB.*/
+   
+   u64 pdeCount = mappingSize / (1024 * 1024 * 2); /*2MB.*/
+   if(mappingSize % (1024 * 1024 * 2) != 0)
+      pdeCount += 1;   /*Round up.*/
+   
    u64 pdpteCount = pdeCount / 512;
+   if(pdeCount % 512 != 0)
+      pdpteCount += 1; /*Round up.*/
+   
    pml4eCount = pdpteCount / 512;
+   if(pdpteCount % 512 != 0)
+      pml4eCount += 1; /*Round up.*/
+   
    u64 *endAddress;
 
-   if(!pdpteCount)
-      pdpteCount = 1;
-   if(!pml4eCount)
-      pml4eCount = 1;
    ++pml4eCount; /*Reserved for task.*/
 
 #define ALIGN(p) ((p + 511) & (~511))
@@ -308,7 +312,7 @@ int initPaging(void)
    kernelPDEDir = (u64 *)ALIGN((pointer)endAddressOfKernel);
    for(int i = 0;i < pdeCount;++i)
    {
-      kernelPDEDir[i] = ((u64)i) * (1024*1024*2) + 0x183;
+      kernelPDEDir[i] = ((u64)i) * (1024 * 1024 * 2) + 0x183;
                                 /*All kernel pages are global pages.*/
    }
    for(int i = pdeCount;i < realPDECount;++i)
@@ -499,7 +503,7 @@ int doPageFault(IRQRegisters *reg)
 
    asm volatile("movq %%cr2,%%rax":"=a"(address));
                       /*Get the address which produces this exception.*/
-   if(!current->mm) /*Kernel Task!*/
+   if(!current || !current->mm) /*Kernel Task!*/
       return -ENOSYS;
    if(address > PAGE_OFFSET)
       return -EFAULT;

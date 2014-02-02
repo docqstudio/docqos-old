@@ -93,7 +93,6 @@ int freeIRQ(u8 irq)
 
 int initInterrupt(void)
 {
-   initIDT();
    initPIC(); /*In fact,it will disable PIC.*/
    int retval;
 

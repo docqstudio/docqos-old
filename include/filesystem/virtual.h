@@ -84,7 +84,7 @@ typedef struct VFSINode{
 } VFSINode;
 
 typedef struct FileSystemMount{
-   VFSDentry *parent;
+   VFSDentry *point;
    VFSDentry *root;
 
    FileSystem *fs;

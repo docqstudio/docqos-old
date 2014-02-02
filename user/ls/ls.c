@@ -51,6 +51,7 @@ int main(int argc,const char *argv[])
          }
          break;
       }
+      write(stdout,"\t",0);
       i += length + 3;
    }
    write(stdout,"\n",0); /*Print a '\n'.*/

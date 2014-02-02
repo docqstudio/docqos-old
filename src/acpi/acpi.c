@@ -55,6 +55,14 @@ typedef struct IOApic{
    u32 globalSystemInterruptBase;
 } __attribute__ ((packed)) IOApic;
 
+typedef struct ApicOverride{
+   ApicHeader header;
+   u8 bus;
+   u8 source;
+   u32 interrupt;
+   u16 flags;
+} __attribute__ ((packed)) ApicOverride;
+
 #define APIC_TYPE_LOCAL_APIC         0x0
 #define APIC_TYPE_IO_APIC            0x1
 #define APIC_TYPE_INTERRUPT_OVERRIDE 0x2
@@ -108,6 +116,10 @@ static int parseApic(ACPIHeaderApic *apic)
             break;
          }
       case APIC_TYPE_INTERRUPT_OVERRIDE:
+         {
+            ApicOverride *override = (ApicOverride *)apicHeader;
+            printk("Found Override: %d => %d\n",override->source,override->interrupt);
+         }
          break;
       default:
          printk("Unknow Apic information type:%d,length:%d.\n",(int)type,(int)length);

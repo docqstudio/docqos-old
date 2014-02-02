@@ -13,8 +13,6 @@ typedef struct DevfsINode{
    ListHead list;
 } DevfsINode;
 
-static VFSDentry *devfsRootDentry = 0;
-
 static int devfsMount(BlockDevicePart *part __attribute__ ((unused))
    ,FileSystemMount *mnt);
 static int devfsLookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
@@ -43,6 +41,7 @@ static VFSINodeOperation devfsINodeOperation = {
 };
 
 static DevfsINode devfsRoot;
+static VFSDentry *devfsRootDentry = 0;
 
 static int devfsReadDir(VFSFile *file,VFSDirFiller filler,void *data)
 {
@@ -60,7 +59,7 @@ static int devfsReadDir(VFSFile *file,VFSDirFiller filler,void *data)
          break;
       ++file->seek;
    case 1:
-      if((*filler)(data,1,1,"..") < 0)
+      if((*filler)(data,1,2,"..") < 0)
          break;
       ++file->seek;
    default:
