@@ -89,7 +89,6 @@ typedef struct FileSystemMount{
 
    FileSystem *fs;
    ListHead list;
-   AtomicType ref;
 } FileSystemMount;
 
 typedef struct FileSystem{
@@ -105,18 +104,21 @@ int registerFileSystem(FileSystem *system);
 FileSystem *lookForFileSystem(const char *name);
 BlockDevicePart *openBlockDeviceFile(const char *path);
 
-int doMount(const char *point,FileSystem *fs,BlockDevicePart *part);
+int doChroot(const char *dir);
+int doMount(const char *point,FileSystem *fs,
+          BlockDevicePart *part,u8 init);
 int doOpen(const char *path);
 int doClose(int fd);
 int doRead(int fd,void *buf,u64 size);
-int writeFile(VFSFile *file,const void *buf,u64 size);
 int doLSeek(int fd,u64 offset);
 int doGetDents64(int fd,void *data,u64 size);
+int doWrite(int fd,const void *buf,u64 size);
 
 VFSFile *openFile(const char *path);
 int readFile(VFSFile *file,void *buf,u64 size);
-int doWrite(int fd,const void *buf,u64 size);
+int writeFile(VFSFile *file,const void *buf,u64 size);
 int closeFile(VFSFile *file);
 int lseekFile(VFSFile *file,u64 offset);
 
 VFSFile *cloneFile(VFSFile *file);
+int mountRoot(BlockDevicePart *part);

@@ -248,7 +248,7 @@ static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)
       if((!isDir) && (filename[0] == '_'))
          filename[0] = '.';
       if((!isDir) && (filename[length - 1] == '.'))
-         filename[length - 1] = '\0';
+         filename[length -= 1] = '\0';
       else
          filename[length] = '\0';  /*Set end.*/
 

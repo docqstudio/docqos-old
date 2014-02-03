@@ -62,7 +62,7 @@ int kinit(void)
       printkInColor(0x00,0xff,0xff,"%s\n",buf);
    }
    printk("Run 'mount -t devfs devfs /dev'.\n");
-   doMount("/dev",lookForFileSystem("devfs"),0);
+   doMount("/dev",lookForFileSystem("devfs"),0,0);
    printk("Next,check if '/dev/cdrom0' exists:");
    if(openBlockDeviceFile("/dev/cdrom0"))
       printkInColor(0x00,0xff,0x00,"Yes!\n\n");

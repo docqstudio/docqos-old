@@ -1,7 +1,7 @@
 #include <lib/string.h>
 #include <core/const.h>
 
-void *memcpy(void *to,const void *from,int n) /*NOTE: It's easy enough,but it's also slow enough.*/
+void *memcpy(void *to,const void *from,int n)
 {
    asm volatile (
       "cld\n\t"

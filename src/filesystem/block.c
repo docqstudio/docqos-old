@@ -18,7 +18,7 @@ static int syncBlockDevice(void)
    for(ListHead *list = parts.next;list != &parts;list = list->next)
    {
       BlockDevicePart *part = listEntry(list,BlockDevicePart,list);
-      if(doMount("/",0,part) == 0)
+      if(!mountRoot(part))
          return 0; /*Try to mount.*/
    }
    return -ENODEV;

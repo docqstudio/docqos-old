@@ -63,9 +63,9 @@ static int devfsReadDir(VFSFile *file,VFSDirFiller filler,void *data)
          break;
       ++file->seek;
    default:
-      for(p = &inode->list;p != &devfsRoot.children;p = p->next)
+      for(p = inode->list.next;p != &devfsRoot.children;p = p->next)
       {
-         DevfsINode *d = listEntry(p->next,DevfsINode,list);
+         DevfsINode *d = listEntry(p,DevfsINode,list);
          if(d->name[0] == '\0')
             continue;
          if((*filler)(data,0,strlen(d->name),d->name) < 0)
