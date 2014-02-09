@@ -4,12 +4,13 @@
 
 typedef struct MultibootTagFrameBuffer MultibootTagFrameBuffer;
 
+int initFrameBuffer(MultibootTagFrameBuffer *fb);
+
 inline int frameBufferDrawPoint(u8 red,u8 green,u8 blue,int x,int y) __attribute__((always_inline));
 inline int frameBufferWriteString(const char *string) __attribute__ ((always_inline));
 
 int frameBufferFillRect(
    u8 red,u8 green,u8 blue,int x,int y,int width,int height);
-int initFrameBuffer(MultibootTagFrameBuffer *fb);
 int frameBufferDrawChar(u8 red,u8 green,u8 blue,int x,int y,unsigned char charDrawing);
 int frameBufferDrawString(u8 red,u8 green,u8 blue,int x,int y,const char *string);
 int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string);

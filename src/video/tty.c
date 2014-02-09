@@ -1,109 +1,200 @@
 #include <core/const.h>
+#include <video/framebuffer.h>
+#include <video/tty.h>
+#include <task/task.h>
+#include <cpu/spinlock.h>
+#include <memory/kmalloc.h>
+#include <lib/string.h>
 #include <filesystem/virtual.h>
 #include <filesystem/devfs.h>
-#include <video/framebuffer.h>
-#include <cpu/io.h>
-#include <lib/string.h>
 
-typedef struct TTYReader{
-   Task *reader;
-   u8 buf[50];
-   u64 size;
-   u64 pos;
-   SpinLock lock;
-} TTYReader;
+typedef u8 (KeyboardCallback)(u8 data);
 
-static int ttyWrite(VFSFile *file,const void *buf,u64 size);
-static int ttyRead(VFSFile *file,void *buf,u64 size);
+typedef struct TTYTaskQueue{
+   u8 type; /*1:Read from screen;2:Write to screen;3:Data from keyboard.*/
+   Task *task;
+   
+   u8 data;
+   union{
+      char *s;
+      KeyboardCallback *callback;
+   };
+   ListHead list;
+} TTYTaskQueue;
 
-static VFSFileOperation ttyFileOperation = {
-   .lseek = 0,
-   .read = ttyRead,
-   .write = ttyWrite
+static Task *ttyTask = 0;
+static SpinLock ttyTaskQueueLock;
+static ListHead ttyTaskQueue;
+
+static VFSFileOperation ttyOperation = {
+   .read = &ttyRead,
+   .write = &ttyWrite,
+   .readDir = 0,
+   .lseek = 0
 };
 
-static TTYReader ttyReader;
-
-static int ttyWrite(VFSFile *file,const void *buf,u64 size)
+static int ttyTaskFunction(void *data)
 {
-   frameBufferWriteString((const char *)buf); /*Ingore size.*/
+   int position = 0;
+   TTYTaskQueue *reader = 0;
+
+   TTYTaskQueue *queue;
+   ttyTask = getCurrentTask();
+   for(;;)
+   {
+      lockSpinLock(&ttyTaskQueueLock);
+      while(!listEmpty(&ttyTaskQueue))
+      {
+         queue = listEntry(ttyTaskQueue.next,TTYTaskQueue,list);
+         listDelete(&queue->list); /*Get the queue and delete it.*/
+         unlockSpinLock(&ttyTaskQueueLock);
+
+         switch(queue->type)
+         {
+         case 1:
+            if(reader && (queue->data = -EBUSY))
+               break;
+            reader = queue;
+            position = 0;
+            break;
+         case 2:
+            queue->data =
+               frameBufferWriteString(queue->s);
+            if(queue->task) /*Is the task waiting?*/
+               wakeUpTask(queue->task);
+            else
+               kfree(queue->s),kfree(queue);
+            break;
+         case 3:
+            queue->data = (*queue->callback)(queue->data);
+            if(!queue->data)
+               break;
+            if(!reader || position != 0 || queue->data != '\b')
+               frameBufferWriteString((const char []){queue->data,'\0'});
+            if(!reader)
+               break;
+            if(queue->data == '\b' && position == 0)
+               break;
+            else if(queue->data == '\b' && ((--position),1))
+               break;
+            if(queue->data  != '\n')
+               reader->s[position++] = queue->data;
+            if(reader->data == position || queue->data == '\n')
+            {
+               reader->s[position] = '\0';
+               reader->data = position;
+               wakeUpTask(reader->task); /*Wake up the task.*/
+               reader = 0;
+            }
+            kfree(queue);
+            break;
+         default:
+            break;
+         }
+
+         lockSpinLock(&ttyTaskQueueLock);
+      }
+      ttyTask->state = TaskStopping;
+      unlockSpinLock(&ttyTaskQueueLock);
+      schedule(); /*Wait the queue.*/
+   }
    return 0;
-}
-
-static int ttyRead(VFSFile *file,void *buf,u64 size)
-{
-   if(size <= 1)
-      return -EINVAL;
-   if(size >= sizeof(ttyReader.buf) / sizeof(ttyReader.buf[0]))
-      return -EINVAL;
-   Task *current = getCurrentTask();
-   u64 rflags;
-   lockSpinLockCloseInterrupt(&ttyReader.lock,&rflags);
-   if(ttyReader.reader)
-      goto failed; /*If there is a reader,failed!*/
-   ttyReader.reader = current;
-   ttyReader.size = size - 1;
-   ttyReader.pos = 0;
-   current->state = TaskStopping; /*Stop the current task.*/
-   unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   schedule();
-   u64 __size = ttyReader.pos;
-   memcpy(buf,ttyReader.buf,__size + 1);
-   ttyReader.reader = 0; /*I think there is no need to lock ttyReader.lock,right?*/
-   return __size + 1;
-failed:
-   unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   return -EBUSY;
 }
 
 static int initTTY(void)
 {
-   ttyReader.reader = 0;
-   ttyReader.pos = ttyReader.size = 0;
-   initSpinLock(&ttyReader.lock);
-   return devfsRegisterDevice(&ttyFileOperation,"tty");
-      /*Register "/dev/tty" file.*/
+   initSpinLock(&ttyTaskQueueLock);
+   initList(&ttyTaskQueue);
+   createKernelTask(&ttyTaskFunction,0);
+   return 0;
 }
 
-int ttyKeyboardPress(char i)
+static int registerTTY(void)
 {
-   u64 rflags;
-   char string[2] = {i,'\0'};
-   lockSpinLockCloseInterrupt(&ttyReader.lock,&rflags);
-   if(!ttyReader.reader) /*If no readers,just goto out.*/
-      goto out;
-   if(ttyReader.pos == ttyReader.size) /*If the buffer is full,goto out.*/
-      goto out;
-   if(i == '\n') 
-      goto wakeUp; /*Wake up the reader.*/
-   if(i == '\b')
-   {
-      if(ttyReader.pos)
-         --ttyReader.pos;
-      else
-         goto ret;
-      goto out;
-   }
-   ttyReader.buf[ttyReader.pos++] = i;
-   if(ttyReader.pos == ttyReader.size) /*If the buffer is full,wake up the reader.*/
-      goto wakeUp;
-out:
-   unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   frameBufferWriteString(string);
-   return 0;
-ret:
-   unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   return 0;
-wakeUp:
-   ttyReader.buf[ttyReader.pos] = '\0'; /*Set end.*/
-   unlockSpinLockRestoreInterrupt(&ttyReader.lock,&rflags);
-   string[0] = i;
-   if(i != '\n')
-      frameBufferWriteString(string);
-   string[0] = '\n';
-   frameBufferWriteString(string);
-   wakeUpTask(ttyReader.reader); /*Wake up the reader!*/
+   return devfsRegisterDevice(&ttyOperation,"tty");
+}
+
+int ttyKeyboardPress(KeyboardCallback *callback,u8 data)
+{
+   TTYTaskQueue *queue = kmalloc(sizeof(*queue));
+   if(unlikely(!queue))
+      return -ENOMEM;
+   queue->task = 0;
+   queue->type = 3; /*Key pressed.*/
+   queue->data = data;
+   queue->callback = callback; 
+   lockSpinLock(&ttyTaskQueueLock);
+   listAddTail(&queue->list,&ttyTaskQueue);
+   unlockSpinLock(&ttyTaskQueueLock);
+            /*Tell the tty task and wake it up.*/
+   wakeUpTask(ttyTask);
    return 0;
 }
 
-driverInitcall(initTTY);
+int ttyWrite(VFSFile *file,const void *string,u64 size)
+{
+   u8 len = strlen(string);
+   if(len == 0)
+      return 0;
+   char *s = kmalloc(len + 1);
+   if(!s)
+      return -ENOMEM;
+   memcpy(s,string,len + 1); /*Copy it.*/
+   TTYTaskQueue *queue = kmalloc(sizeof(*queue));
+   if(!queue && (kfree(s),1))
+      return -ENOMEM;
+   queue->type = 2;
+   queue->task = 0;/*No need to wait it.*/
+   queue->s = s; /*The queue and the string will be free in the tty task0*/
+   queue->data = 0;
+   
+   lockSpinLock(&ttyTaskQueueLock);
+   listAddTail(&queue->list,&ttyTaskQueue);
+   unlockSpinLock(&ttyTaskQueueLock);
+             /*Tell the tty task and wake it up!*/
+   wakeUpTask(ttyTask);
+   return 0;
+}
+
+int ttyRead(VFSFile *file,void *string,u64 data)
+{
+   switch(data)
+   {
+   case 1:
+      *(u8 *)string = '\0';
+   case 0:
+      return data;
+   default:
+      break;
+   }
+   char *s = kmalloc(data);
+   if(!s)
+      return -ENOMEM;
+   TTYTaskQueue *queue = kmalloc(sizeof(*queue));
+   queue->type = 1;
+   queue->data = data - 1;
+   queue->s = s;
+   queue->task = getCurrentTask(); /*We are waiting.*/
+
+   lockSpinLock(&ttyTaskQueueLock);
+   listAddTail(&queue->list,&ttyTaskQueue);
+   getCurrentTask()->state = TaskStopping; /*Stop current.*/
+   unlockSpinLock(&ttyTaskQueueLock);
+
+   wakeUpTask(ttyTask);
+   schedule();
+
+   if(queue->data < 0)
+      goto out;
+   memcpy(string,s,queue->data);
+   ((u8 *)string)[queue->data] = '\0'; /*Set end.*/
+
+out:
+   data = queue->data;
+   kfree(s);
+   kfree(queue); /*Free them.*/
+   return data;
+}
+
+subsysInitcall(initTTY);
+driverInitcall(registerTTY);

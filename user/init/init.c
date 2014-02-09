@@ -78,7 +78,7 @@ int shell(void)
    volatile char cmd[35];
    for(;;)
    {    /*Print "losthost / $ ".*/
-      write(stdout,"\xffs\xff\x00\x00losthost \xffs\x00\x00\xff/ $ ",0);
+      write(stdout,"\xffsff0000losthost \xffs0000ff/ $ ",0);
       read(stdin,(void *)cmd,sizeof(cmd) - 3);
       if(cmd[0] == 'r' && cmd[1] == 'e' && cmd[2] == 'b' &&
          cmd[3] == 'o' && cmd[4] == 'o' && cmd[5] == 't' &&

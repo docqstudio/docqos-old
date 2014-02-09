@@ -20,7 +20,7 @@
 
 #define KB_IRQ            0x01
 
-extern int ttyKeyboardPress(char i);
+extern int ttyKeyboardPress();
 
 static const u8 keyboardMap[] = {
    '\0','\0','1' ,'2',
@@ -70,11 +70,6 @@ static const u8 keyboardMapShift[] = {
    '2' ,'3' ,'0' ,'.'
 };
 
-static u8 keyboardBuffer[128];
-static int keyboardRead = 0,keyboardWrite = 0;
-static SpinLock keyboardLock;
-static Task *keyboardTask;
-
 static int keyboardOut(int data)
 {
    while(inb(KB_STATUS) & KB_STATUS_BUSY)
@@ -99,100 +94,81 @@ static int keyboardTestIn(void)
    return 0;
 }
 
-static int keyboardIRQ(IRQRegisters *reg,void *unused)
+static u8 keyboardCallback(u8 data)
 {
-   u64 rflags;
-   u8 data;
-   lockSpinLockCloseInterrupt(&keyboardLock,&rflags);
-   while(inb(KB_STATUS) & KB_STATUS_DATA){
-      data = inb(KB_DATA); /*Get scan code and put it into keyboardBuffer.*/
-      keyboardBuffer[keyboardWrite++] = data;
-      if(keyboardWrite == sizeof(keyboardBuffer)/sizeof(keyboardBuffer[0]))
-         keyboardWrite = 0;
-      inb(KB_STATUS);
-   }
-   wakeUpTask(keyboardTask);
-   unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
-   return 0;
-}
-
-static int __keyboardTask(void *data)
-{
-   u8 shift = 0,caps = 0,num = 1,scroll = 0;
-   keyboardTask = getCurrentTask();
+   static u8 shift = 0,caps = 0,num = 1,scroll = 0;
    //keyboardOut(KB_CMD_LED);
    //keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
-   for(;;)
-   {
-      u64 rflags;
-      u8 i,keypad = 0;
-      lockSpinLockCloseInterrupt(&keyboardLock,&rflags);
-      if(keyboardRead == keyboardWrite)
-      {
-         keyboardTask->state = TaskStopping;
-         unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
-         schedule();
-         continue;
-      }
-reget:
-      i = keyboardBuffer[keyboardRead++];
-      if(keyboardRead == sizeof(keyboardBuffer)/sizeof(keyboardBuffer[0]))
-         keyboardRead = 0;
-      if(i == 0xe0)
-         goto reget;
-      unlockSpinLockRestoreInterrupt(&keyboardLock,&rflags);
-         /*Get scan code.*/
+   u8 keypad = 0;
+   if(data == 0xe0)
+      return 0;
 
-      u8 make = !(i & 0x80);
-      i &= 0x7f;
-      switch(i)
-      {
-      case 0x2a:
-      case 0x36:
-         shift = !!make;
+   u8 make = !(data & 0x80);
+   data &= 0x7f;
+   switch(data)
+   {
+   case 0x2a:
+   case 0x36:
+      shift = !!make;
+      data = 0;
+      break;
+   case 0x3a:
+      if(!make)
          break;
-      case 0x3a:
-         if(!make)
-            break;
-         caps = !caps;
-     //    keyboardOut(KB_CMD_LED);
-     //    keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+      caps = !caps;
+   //    keyboardOut(KB_CMD_LED);
+   //    keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+      data = 0;
+      break;
+   case 0x45:
+      if(!make)
          break;
-      case 0x45:
-         if(!make)
-            break;
-         num = !num;
-      //   keyboardOut(KB_CMD_LED);
-      //   keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
-      case 0x46:
-         if(!make)
-            break;
-         scroll = !scroll;
+      num = !num;
+   //   keyboardOut(KB_CMD_LED);
+   //   keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+      data = 0;
+      break;
+   case 0x46:
+      if(!make)
+         break;
+      scroll = !scroll;
    //      keyboardOut(KB_CMD_LED);
    //      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+      data = 0;
+      break;
+   default:
+      if(!make && ((data = 0),1))
          break;
-      default:
-         if(!make)
-            break;
-         if(i >= sizeof(keyboardMap) / sizeof(keyboardMap[0]))
-            break;
-         if(0x47 <= i && i <= 0x53)
-            keypad = 1;
-         if(shift)
-            i = keyboardMapShift[i];
-         else
-            i = keyboardMap[i];
-         if(!i)
-            break;
-         if(('0' <= i) && (i <= '9') && keypad)
-            if(!num)
-               break;
-         if(('a' <= i) && (i <= 'z'))
-            if(shift ^ caps)
-               i -= 'a' - 'A';
-         ttyKeyboardPress(i); /*Tell tty.*/
+      if(data >= sizeof(keyboardMap) / sizeof(keyboardMap[0]) && 
+                                              ((data = 0),1))
          break;
-      }
+      if(0x47 <= data && data <= 0x53)
+         keypad = 1;
+      if(shift)
+         data = keyboardMapShift[data];
+      else
+         data = keyboardMap[data];
+      if(!data)
+         break;
+      if(('0' <= data) && (data <= '9') && keypad)
+         if(!num)
+            break;
+      if(('a' <= data) && (data <= 'z'))
+         if(shift ^ caps)
+            data -= 'a' - 'A';
+      break;
+   }
+   return data;
+}
+
+
+static int keyboardIRQ(IRQRegisters *reg,void *unused)
+{
+   u8 data;
+   while(inb(KB_STATUS) & KB_STATUS_DATA){
+      data = inb(KB_DATA); /*Get scan code and put it into keyboardBuffer.*/
+      ttyKeyboardPress(&keyboardCallback,data);
+      inb(KB_STATUS);
    }
    return 0;
 }
@@ -215,11 +191,7 @@ static int initKeyboard(void)
    if(keyboardOut(KB_CMD_ESCAN) != KB_DATA_ACK)
       return -EIO; /*Exist,but failed to init it.*/
 
-   keyboardRead = keyboardWrite = 0;
-   keyboardTask = 0;
-   initSpinLock(&keyboardLock);
    requestIRQ(KB_IRQ,&keyboardIRQ);
-   createKernelTask(&__keyboardTask,0);
    return 0;
 }
 

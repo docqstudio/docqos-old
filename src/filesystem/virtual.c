@@ -651,6 +651,7 @@ int mountRoot(BlockDevicePart *part)
       if(unlikely(!root))
          return -ENOMEM;
       kfree(root->inode); /*We don't need the inode.*/
+      root->parent = 0;
       root->inode = 0;
       root->type = VFSDentryDir;
       current->fs->root = current->fs->pwd = root;

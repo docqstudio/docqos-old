@@ -343,7 +343,7 @@ int initPaging(void)
    {
       kernelPML4EDir[i] = 0;
    }
-   endAddress = &kernelPML4EDir[realPML4ECount] + 1;
+   endAddress = &kernelPML4EDir[realPML4ECount];
 
    /*Update endAddressOfKernel.*/
    endAddressOfKernel = (void *)endAddress;

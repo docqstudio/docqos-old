@@ -11,8 +11,8 @@ int main(int argc,const char *argv[])
    if(fd < 0)
       return write(stdout,"Can't open the dir!\n",0);
    unsigned char buffer[2048 + 5];
-   int size,i = 5,first = 0;
-   if((size = getdents64(fd,&buffer[5],sizeof(buffer) - 5)) < 0)
+   int size,i = 8,first = 0;
+   if((size = getdents64(fd,&buffer[8],sizeof(buffer) - 8)) < 0)
       return (close(fd),write(stdout,"Can't get the data!\n",0));
    while(i < size + 5)
    {
@@ -35,19 +35,25 @@ int main(int argc,const char *argv[])
       case 1:
          if(first++){
             buffer[i + 1] = ' ';
-            buffer[i + 0] = '\xff';
-            buffer[i - 1] = '\x99';
-            buffer[i - 2] = '\x00'; /*Color Blue and ' '.*/
-            buffer[i - 3] = 's';
-            buffer[i - 4] = '\xff';
-            write(stdout,&buffer[i - 4],0);
+            buffer[i + 0] = 'f';
+            buffer[i - 1] = 'f';
+            buffer[i - 2] = '9';
+            buffer[i - 3] = '9';
+            buffer[i - 4] = '0';
+            buffer[i - 5] = '0';
+            buffer[i - 6] = 's';
+            buffer[i - 7] = '\xff';
+            write(stdout,&buffer[i - 7],0);
          }else{
-            buffer[i + 1] = '\xff';
-            buffer[i + 0] = '\x99';
-            buffer[i - 1] = '\x00';
-            buffer[i - 2] = 's'; /*Color Blue.*/
-            buffer[i - 3] = '\xff';
-            write(stdout,&buffer[i - 3],0);
+            buffer[i + 1] = 'f';
+            buffer[i + 0] = 'f';
+            buffer[i - 1] = '9';
+            buffer[i - 2] = '9'; /*Color Blue.*/
+            buffer[i - 3] = '0';
+            buffer[i - 4] = '0';
+            buffer[i - 5] = 's';
+            buffer[i - 6] = '\xff';
+            write(stdout,&buffer[i - 6],0);
          }
          break;
       }
