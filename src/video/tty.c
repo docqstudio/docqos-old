@@ -3,12 +3,11 @@
 #include <video/tty.h>
 #include <task/task.h>
 #include <cpu/spinlock.h>
+#include <cpu/io.h>
 #include <memory/kmalloc.h>
 #include <lib/string.h>
 #include <filesystem/virtual.h>
 #include <filesystem/devfs.h>
-
-typedef u8 (KeyboardCallback)(u8 data);
 
 typedef struct TTYTaskQueue{
    u8 type; /*1:Read from screen;2:Write to screen;3:Data from keyboard.*/
@@ -35,6 +34,7 @@ static VFSFileOperation ttyOperation = {
 
 static int ttyTaskFunction(void *data)
 {
+   u64 rflags;
    int position = 0;
    TTYTaskQueue *reader = 0;
 
@@ -42,12 +42,12 @@ static int ttyTaskFunction(void *data)
    ttyTask = getCurrentTask();
    for(;;)
    {
-      lockSpinLock(&ttyTaskQueueLock);
+      lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
       while(!listEmpty(&ttyTaskQueue))
       {
          queue = listEntry(ttyTaskQueue.next,TTYTaskQueue,list);
          listDelete(&queue->list); /*Get the queue and delete it.*/
-         unlockSpinLock(&ttyTaskQueueLock);
+         unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
 
          switch(queue->type)
          {
@@ -92,10 +92,10 @@ static int ttyTaskFunction(void *data)
             break;
          }
 
-         lockSpinLock(&ttyTaskQueueLock);
+         lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
       }
       ttyTask->state = TaskStopping;
-      unlockSpinLock(&ttyTaskQueueLock);
+      unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
       schedule(); /*Wait the queue.*/
    }
    return 0;
@@ -116,6 +116,7 @@ static int registerTTY(void)
 
 int ttyKeyboardPress(KeyboardCallback *callback,u8 data)
 {
+   u64 rflags;
    TTYTaskQueue *queue = kmalloc(sizeof(*queue));
    if(unlikely(!queue))
       return -ENOMEM;
@@ -123,9 +124,10 @@ int ttyKeyboardPress(KeyboardCallback *callback,u8 data)
    queue->type = 3; /*Key pressed.*/
    queue->data = data;
    queue->callback = callback; 
-   lockSpinLock(&ttyTaskQueueLock);
+
+   lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
    listAddTail(&queue->list,&ttyTaskQueue);
-   unlockSpinLock(&ttyTaskQueueLock);
+   unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
             /*Tell the tty task and wake it up.*/
    wakeUpTask(ttyTask);
    return 0;
@@ -133,6 +135,7 @@ int ttyKeyboardPress(KeyboardCallback *callback,u8 data)
 
 int ttyWrite(VFSFile *file,const void *string,u64 size)
 {
+   u64 rflags;
    u8 len = strlen(string);
    if(len == 0)
       return 0;
@@ -148,9 +151,9 @@ int ttyWrite(VFSFile *file,const void *string,u64 size)
    queue->s = s; /*The queue and the string will be free in the tty task0*/
    queue->data = 0;
    
-   lockSpinLock(&ttyTaskQueueLock);
+   lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
    listAddTail(&queue->list,&ttyTaskQueue);
-   unlockSpinLock(&ttyTaskQueueLock);
+   unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
              /*Tell the tty task and wake it up!*/
    wakeUpTask(ttyTask);
    return 0;
@@ -158,6 +161,7 @@ int ttyWrite(VFSFile *file,const void *string,u64 size)
 
 int ttyRead(VFSFile *file,void *string,u64 data)
 {
+   u64 rflags;
    switch(data)
    {
    case 1:
@@ -176,10 +180,10 @@ int ttyRead(VFSFile *file,void *string,u64 data)
    queue->s = s;
    queue->task = getCurrentTask(); /*We are waiting.*/
 
-   lockSpinLock(&ttyTaskQueueLock);
+   lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
    listAddTail(&queue->list,&ttyTaskQueue);
    getCurrentTask()->state = TaskStopping; /*Stop current.*/
-   unlockSpinLock(&ttyTaskQueueLock);
+   unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
 
    wakeUpTask(ttyTask);
    schedule();

@@ -3,6 +3,7 @@
 #include <cpu/io.h>
 #include <cpu/spinlock.h>
 #include <video/console.h>
+#include <video/tty.h>
 #include <task/task.h>
 
 #define KB_DATA   0x60
@@ -19,8 +20,6 @@
 #define KB_DATA_ACK       0xfa
 
 #define KB_IRQ            0x01
-
-extern int ttyKeyboardPress();
 
 static const u8 keyboardMap[] = {
    '\0','\0','1' ,'2',
@@ -97,8 +96,10 @@ static int keyboardTestIn(void)
 static u8 keyboardCallback(u8 data)
 {
    static u8 shift = 0,caps = 0,num = 1,scroll = 0;
-   //keyboardOut(KB_CMD_LED);
-   //keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#if 0
+   keyboardOut(KB_CMD_LED);
+   keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#endif
    u8 keypad = 0;
    if(data == 0xe0)
       return 0;
@@ -108,42 +109,48 @@ static u8 keyboardCallback(u8 data)
    switch(data)
    {
    case 0x2a:
-   case 0x36:
+   case 0x36: /*Right-Shift and Left-Shift.*/
       shift = !!make;
       data = 0;
       break;
-   case 0x3a:
+   case 0x3a: /*CapsLock.*/
       if(!make)
          break;
       caps = !caps;
-   //    keyboardOut(KB_CMD_LED);
-   //    keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#if 0
+      keyboardOut(KB_CMD_LED);
+      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#endif
       data = 0;
       break;
-   case 0x45:
+   case 0x45: /*NumLock.*/
       if(!make)
          break;
       num = !num;
-   //   keyboardOut(KB_CMD_LED);
-   //   keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#if 0
+      keyboardOut(KB_CMD_LED);
+      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#endif
       data = 0;
       break;
-   case 0x46:
+   case 0x46: /*ScrollLock.*/
       if(!make)
          break;
       scroll = !scroll;
-   //      keyboardOut(KB_CMD_LED);
-   //      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#if 0
+      keyboardOut(KB_CMD_LED);
+      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
+#endif
       data = 0;
       break;
    default:
-      if(!make && ((data = 0),1))
+      if(!make && ((data = 0),1)) /*Ingore break code.*/
          break;
       if(data >= sizeof(keyboardMap) / sizeof(keyboardMap[0]) && 
                                               ((data = 0),1))
-         break;
+         break; 
       if(0x47 <= data && data <= 0x53)
-         keypad = 1;
+         keypad = 1; /*Keypad.*/
       if(shift)
          data = keyboardMapShift[data];
       else
@@ -151,11 +158,11 @@ static u8 keyboardCallback(u8 data)
       if(!data)
          break;
       if(('0' <= data) && (data <= '9') && keypad)
-         if(!num)
+         if(!num) 
             break;
       if(('a' <= data) && (data <= 'z'))
          if(shift ^ caps)
-            data -= 'a' - 'A';
+            data -= 'a' - 'A'; /*To the supper case.*/
       break;
    }
    return data;
