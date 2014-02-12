@@ -1,6 +1,8 @@
+#include <core/const.h>
 #include <memory/buddy.h>
 #include <memory/memory.h>
 #include <video/console.h>
+#include <cpu/spinlock.h>
 
 #define MAX_ORDER 0xB
 
@@ -9,8 +11,9 @@ extern void *endAddressOfKernel; /*See also ldscripts/kernel.lds.*/
 static PhysicsPage *memoryMap = 0;
 static u64 physicsPageCount = 0;
 
-static ListHead freeList[MAX_ORDER] = {};
+static ListHead buddyFreeList[MAX_ORDER];
 /*MAX_ORDER is 11,so we can get 2^(MAX_ORDER - 1)*PAGE_SIZE = 4MB memory once at most.*/
+static SpinLock buddySpinLock[MAX_ORDER];
 
 static inline int initPhysicsPage(PhysicsPage *page) 
    __attribute ((always_inline));
@@ -20,7 +23,7 @@ static inline int pageIsBuddy(PhysicsPage *page,unsigned int order)
 
 static inline int initPhysicsPage(PhysicsPage *page)
 {
-   page->count = 1; /*Used.*/
+   atomicSet(&page->count,1); /*Used.*/
    page->flags = 0;
    page->data = 0;
    initList(&page->list);
@@ -29,7 +32,7 @@ static inline int initPhysicsPage(PhysicsPage *page)
 
 static inline int pageIsBuddy(PhysicsPage *page,unsigned int order)
 {
-   if((page->count == 0) && !(page->flags & PageReserved) &&
+   if((atomicRead(&page->count) == 0) && !(page->flags & PageReserved) &&
       (page->flags & PageData) && (page->data == order))
       return 1;
    return 0;
@@ -46,7 +49,11 @@ int initBuddySystem(void)
 
    for(int order  = 0;order < MAX_ORDER;++order)
    {
-      initList(&freeList[order]);
+      initList(&buddyFreeList[order]);
+   }
+   for(int order = 0;order < MAX_ORDER;++order)
+   {
+      initSpinLock(&buddySpinLock[order]);
    }
 
    for(int i = 0;i < physicsPageCount;++i)
@@ -73,8 +80,9 @@ int freePages(PhysicsPage *page,unsigned int order)
       return -EINVAL; /*Error!*/
    if(page->flags & PageReserved)
       return -EPERM;
-   if(--page->count)
+   if(atomicAddRet(&page->count,-1) != 0)
       return 0;
+   lockSpinLock(&buddySpinLock[order]);
    while(order < MAX_ORDER - 1)
    {
       buddyIndex = pageIndex ^ (1 << order);
@@ -85,13 +93,16 @@ int freePages(PhysicsPage *page,unsigned int order)
       page->data = 0;
       listDelete(&buddy->list);
       pageIndex &= buddyIndex;
+      unlockSpinLock(&buddySpinLock[order]);
       ++order;
+      lockSpinLock(&buddySpinLock[order]);
    } /*Try to merge.*/
    targetPage = memoryMap + pageIndex;
    targetPage->flags |= PageData;
    targetPage->data = order;
-   targetPage->count = 0;
-   listAddTail(&targetPage->list,&freeList[order]);
+   atomicSet(&targetPage->count,0);
+   listAddTail(&targetPage->list,&buddyFreeList[order]);
+   unlockSpinLock(&buddySpinLock[order]);
    return 0;
 }
 
@@ -102,25 +113,31 @@ PhysicsPage *allocPages(unsigned int order)
    PhysicsPage *page,*buddy;
    for(;currentOrder < MAX_ORDER;++currentOrder)
    {
-      if(!listEmpty(&freeList[currentOrder]))
+      lockSpinLock(&buddySpinLock[currentOrder]);
+      if(!listEmpty(&buddyFreeList[currentOrder]))
       {
-         page = listEntry(freeList[currentOrder].next,PhysicsPage,list);
-         ++page->count;
+         page = listEntry(buddyFreeList[currentOrder].next,PhysicsPage,list);
+         listDelete(&page->list);
+         unlockSpinLock(&buddySpinLock[currentOrder]);
+         
+         atomicAdd(&page->count,1);
          page->flags &= ~PageData;
          page->data = 0;
-         listDelete(&page->list);
          size = 1ul << currentOrder;
          while(currentOrder > order)
          {
             --currentOrder;
             size >>= 1;
             buddy = page + size;
-            listAddTail(&buddy->list,&freeList[currentOrder]);
+            lockSpinLock(&buddySpinLock[currentOrder]);
+            listAddTail(&buddy->list,&buddyFreeList[currentOrder]);
+            unlockSpinLock(&buddySpinLock[currentOrder]);
             buddy->flags |= PageData;
             buddy->data = currentOrder;
          } /*Split the page.*/
          return page;
       }
+      unlockSpinLock(&buddySpinLock[currentOrder]);
    }
    return 0;
 }
@@ -133,27 +150,32 @@ PhysicsPage *allocAlignedPages(unsigned int order)
    u64 align = (PHYSICS_PAGE_SIZE << order) - 1;
    for(;currentOrder < MAX_ORDER;++currentOrder)
    {
-      for(ListHead *list = freeList[currentOrder].next;list != &freeList[currentOrder];list = list->next)
+      lockSpinLock(&buddySpinLock[currentOrder]);
+      for(ListHead *list = buddyFreeList[currentOrder].next;list != &buddyFreeList[currentOrder];list = list->next)
       {
          page = listEntry(list,PhysicsPage,list);
          if(((u64)getPhysicsPageAddress(page) & align) != 0x0)
             continue;
-         ++page->count;
+         listDelete(&page->list);
+         unlockSpinLock(&buddySpinLock[currentOrder]);
+         atomicAdd(&page->count,1);
          page->flags &= ~PageData;
          page->data = 0;
-         listDelete(&page->list);
          size = 1ul << currentOrder;
          while(currentOrder > order)
          {
             --currentOrder;
             size >>= 1;
             buddy = page + size;
-            listAddTail(&buddy->list,&freeList[currentOrder]);
+            lockSpinLock(&buddySpinLock[currentOrder]);
+            listAddTail(&buddy->list,&buddyFreeList[currentOrder]);
+            unlockSpinLock(&buddySpinLock[currentOrder]);
             buddy->flags |= PageData;
             buddy->data = currentOrder;
          } /*Split the page.*/
          return page;
       }
+      unlockSpinLock(&buddySpinLock[currentOrder]);
    }
    return 0;
 }
@@ -165,28 +187,33 @@ PhysicsPage *allocDMAPages(unsigned int order,unsigned int max)
    PhysicsPage *page,*buddy;
    for(;currentOrder < MAX_ORDER;++currentOrder)
    {
-      for(ListHead *list = freeList[currentOrder].next;list != &freeList[currentOrder];list = list->next)
+      lockSpinLock(&buddySpinLock[currentOrder]);
+      for(ListHead *list = buddyFreeList[currentOrder].next;list != &buddyFreeList[currentOrder];list = list->next)
       {
          page = listEntry(list,PhysicsPage,list);
          pointer address = va2pa(getPhysicsPageAddress(page));
          if((address & ((1ul << max) - 1)) != address)
             continue;
-         ++page->count;
+         listDelete(&page->list);
+         unlockSpinLock(&buddySpinLock[currentOrder]);
+         atomicAdd(&page->count,1);
          page->flags &= ~PageData;
          page->data = 0;
-         listDelete(&page->list);
          size = 1ul << currentOrder;
          while(currentOrder > order)
          {
             --currentOrder;
             size >>= 1;
             buddy = page + size;
-            listAddTail(&buddy->list,&freeList[currentOrder]);
+            lockSpinLock(&buddySpinLock[currentOrder]);
+            listAddTail(&buddy->list,&buddyFreeList[currentOrder]);
+            unlockSpinLock(&buddySpinLock[currentOrder]);
             buddy->flags |= PageData;
             buddy->data = currentOrder;
          } /*Split the page.*/
          return page;
       }
+      unlockSpinLock(&buddySpinLock[currentOrder]);
    }
    return 0;
 }

@@ -104,7 +104,7 @@ static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
    u8 isDir = 0,needRead = 1;
    u8 realLength = strlen(name);
    u8 length = realLength;
-   for(int i = 0;i < length;++i)
+   for(int i = 1 /*Not zero.*/;i < length;++i)
       if(name[i] == '.')
         goto next;
    length++;

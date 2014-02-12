@@ -60,6 +60,7 @@ int main(int argc,const char *argv[])
       write(stdout,"\t",0);
       i += length + 3;
    }
+   close(fd);
    write(stdout,"\n",0); /*Print a '\n'.*/
    return 0;
 }

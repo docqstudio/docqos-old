@@ -1,5 +1,6 @@
 #pragma once
 #include <core/list.h>
+#include <cpu/atomic.h>
 #include <memory/paging.h>
 
 #define PHYSICS_PAGE_SIZE    0x1000
@@ -13,7 +14,7 @@ typedef enum PhysicsPageFlags{
 typedef struct PhysicsPage{
    ListHead list;
    PhysicsPageFlags flags;
-   u32 count; /*Should use AtomicType,but ...*/
+   AtomicType count;
    u64 data;
 } PhysicsPage;
 

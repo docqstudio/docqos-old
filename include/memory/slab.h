@@ -1,5 +1,6 @@
 #pragma once
 #include <core/list.h>
+#include <cpu/spinlock_types.h>
 
 typedef u32 SlabObjDescriptor;
 /*It's next free index.*/
@@ -27,6 +28,8 @@ typedef struct SlabCache{
    ListHead slabFree;
    ListHead slabFull;
    ListHead slabPartial;
+
+   SpinLock lock;
 } SlabCache;
 
 typedef struct Slab{

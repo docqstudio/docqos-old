@@ -61,8 +61,23 @@ _start32:
    pushl $0
    pushl %ebx  /*pushq %rbx*/
 
-   pushl $0
+   pushl $0x40000
+   popfl
+   pushfl
+   orl $0x40000,(%esp)
+   jz 3f  /*Check the cpuid support.*/
+   movl $0,(%esp)
    popfl   /*Reset %rflags.*/
+
+   movl $0x80000000,%eax
+   cpuid /*Check the extand cpuid support.*/
+   cmpl $0x80000004,%eax
+   jb 3f
+
+   movl $0x80000001,%eax
+   cpuid
+   btl $29,%edx /*Check the X86_64 support.*/
+   jnc 3f
 
    lgdt (bootGDTR32) /*Load the boot 32-bit GDTR.*/
    ljmp $0x8,$1f
@@ -136,6 +151,8 @@ _start32:
    movabs $_start64,%rcx
    jmp *%rcx 
 
+3:
+   jmp 3b
 .section ".text","ax"
 .code64
 .extern kmain

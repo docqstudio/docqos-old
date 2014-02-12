@@ -3,6 +3,7 @@
 #include <memory/slab.h>
 #include <memory/buddy.h>
 #include <video/console.h>
+#include <cpu/spinlock.h>
 
 #define LOCAL_SLAB_CACHE_BATCH_COUNT_DEFAULT 0x010
 #define LOCAL_SLAB_CACHE_DATA_COUNT_DEFAULT  0x050
@@ -115,11 +116,14 @@ static SlabCache *initSlabCache(SlabCache *cache,u32 objSize,u32 objCount,
    cache->localCache[0] = localCache;
    cache->freeLimit = cache->perSlabObjCount + 2 * cache->localCache[0]->batchCount;
 
+   initSpinLock(&cache->lock);
    return cache;
 }
 
 static void *refillCache(SlabCache *cache)
 {
+   lockSpinLock(&cache->lock);
+
    LocalSlabCache *localCache = cache->localCache[0];
    u32 batchCount = localCache->batchCount + 1;
    if(batchCount == 0)
@@ -150,16 +154,19 @@ retry:
       else
          listAdd(&slab->list,&cache->slabPartial);
    }
-   if(localCache->avail)
+   if(localCache->avail && (unlockSpinLock(&cache->lock),1))
       return localCache->data[--localCache->avail];
-   if(!allocSlabForSlabCache(cache))
+   if(!allocSlabForSlabCache(cache) && (unlockSpinLock(&cache->lock),1))
       return 0; /*Error!*/
-   goto retry; 
+   goto retry;
+   unlockSpinLock(&cache->lock);
    return 0;
 }
 
 static int flushLocalCache(SlabCache *cache)
 {
+   lockSpinLock(&cache->lock);
+   
    LocalSlabCache *localCache = cache->localCache[0];
    u32 batchCount = localCache->batchCount;
    void **objects = localCache->data;
@@ -189,11 +196,13 @@ static int flushLocalCache(SlabCache *cache)
          listAdd(&slab->list,&cache->slabPartial);
    }
    localCache->avail -= batchCount;
+   unlockSpinLock(&cache->lock);
    return 0;
 }
 
 void *allocByCache(SlabCache *cache)
 {
+   disablePreemption(); /*For get the per-cpu value,we should do this first.*/
    LocalSlabCache *localCache = cache->localCache[0];
    void *ret;
 
@@ -201,16 +210,20 @@ void *allocByCache(SlabCache *cache)
       ret = localCache->data[--localCache->avail];
    else
       ret = refillCache(cache);
+   enablePreemption();
    return ret;
 }
 
 int freeByCache(SlabCache *cache,void *obj)
 {
+   disablePreemption();
    LocalSlabCache *localCache = cache->localCache[0];
+                       /*Get the per-cpu value.*/
    
    if(localCache->avail == localCache->limit)
       flushLocalCache(cache);
    localCache->data[localCache->avail++] = obj;
+   enablePreemption();
    return 0;
 }
 
