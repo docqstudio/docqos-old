@@ -214,7 +214,6 @@ static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)
    BlockIO io;
    u64 pos = 0;
    u8 needRead = 1;
-   u8 count = 0;
    io.read = 1;
    io.part = file->dentry->inode->part;
    io.start = file->seek + file->dentry->inode->start;
@@ -229,17 +228,7 @@ static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)
             return -EIO; /*I/O Error!*/
       if(buf[pos] == 0)
          break;
-      switch(count++)
-      {
-      case 0:
-         (*filler)(data,1,1,".");
-         continue;
-      case 1:
-         (*filler)(data,1,2,"..");
-         continue;
-      default:
-         break;
-      }
+      
       u8 isDir = buf[pos + 25] & 0x2;
       u8 length = buf[pos + 32];
       if(!isDir)
@@ -256,6 +245,19 @@ static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)
       for(u64 i = 0;i < length;++i)
          if((filename[i] <= 'Z') && (filename[i] >= 'A'))
             filename[i] -= 'A' - 'a';/*Get the really filename.*/
+
+      if(length == 1 && filename[0] == 0)
+      {
+         if((*filler)(data,1,1,"."))
+            break;
+         continue;
+      }
+      if(length == 1 && filename[0] == 1)
+      {
+         if((*filler)(data,1,2,".."))
+            break;
+         continue;
+      }
 
       if((*filler)(data,!!isDir,length,filename))
          break; 

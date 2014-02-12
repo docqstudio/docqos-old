@@ -17,7 +17,7 @@ typedef enum IDEDeviceType{
 } IDEDeviceType;
 
 typedef enum IDEDeviceSubType{
-   IDEDeviceSubTypeCDROM, /*CD*/
+   IDEDeviceSubTypeCDROM, /*CD-ROM.*/
    IDEDeviceSubTypeDisk
 } IDEDeviceSubType;
 

@@ -13,12 +13,12 @@ int frameBufferFillRect(
    u8 red,u8 green,u8 blue,int x,int y,int width,int height);
 int frameBufferDrawChar(u8 red,u8 green,u8 blue,int x,int y,unsigned char charDrawing);
 int frameBufferDrawString(u8 red,u8 green,u8 blue,int x,int y,const char *string);
-int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string);
+int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string,u64 size);
 
 inline int frameBufferDrawPoint(u8 red,u8 green,u8 blue,int x,int y){
    return frameBufferFillRect(red,green,blue,x,y,0x1,0x1);
 }
 
 inline int frameBufferWriteString(const char *string){
-   return frameBufferWriteStringInColor(0xff,0xff,0xff,string);
+   return frameBufferWriteStringInColor(0xff,0xff,0xff,string,0);
 }

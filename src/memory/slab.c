@@ -80,8 +80,7 @@ static Slab *allocSlabForSlabCache(SlabCache *cache)
 static int destorySlab(SlabCache *cache,Slab *slab)
 {
    void *obj = (void *)slab;
-   PhysicsPage *memoryMap = getMemoryMap();
-   PhysicsPage *page = memoryMap + (((u64)(obj)) >> (4 * 3));
+   PhysicsPage *page = getPhysicsPage(obj);
 
    cache->freeObjCount -= cache->perSlabObjCount;
    listDelete(&slab->list);

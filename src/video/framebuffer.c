@@ -154,6 +154,11 @@ int initFrameBuffer(MultibootTagFrameBuffer *fb)
    frameBufferTag = fb;
    initSemaphore(&frameBufferDisplayLock);
 
+   if(fb->type != 1) /*RGB Mode.*/
+      return -EPROTONOSUPPORT;
+   if(fb->bpp != 24 && fb->bpp != 32)
+      return -EPROTONOSUPPORT;
+
    const u32 width = frameBufferTag->width;
    const u32 height = frameBufferTag->height;
    const u32 bpp = frameBufferTag->bpp / 8;
@@ -236,7 +241,8 @@ int frameBufferDrawString(u8 red,u8 green,u8 blue,int x,int y,const char *string
    return 0;
 }
 
-int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string)
+int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string,
+                                      u64 size)
 {
    char c;
    const u32 width = frameBufferTag->width;
@@ -244,6 +250,7 @@ int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string)
    const u8 sred = red;
    const u8 sblue = blue;
    const u8 sgreen = green;
+   const u8 zero = !size;
 
    downSemaphore(&frameBufferDisplayLock);
    int x,sx = displayPosition % width;
@@ -251,8 +258,9 @@ int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string)
    x = sx;
    y = sy;
 
-   while((c = *(string++)) != 0)
+   for(int i = 0;(i < size) || (zero && *string);++i)
    {
+      c = *string++;
       switch(c)
       {
       case '\r':
@@ -326,6 +334,8 @@ int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string)
          break;
       default:
          if(c == ' ')
+            break;
+         if(c > 0x7e || c < 0x20)
             break;
          frameBufferDrawChar(red,green,blue,x,y,c);
          break;

@@ -14,6 +14,7 @@ int main(int argc,const char *argv[])
    int size,i = 8,first = 0;
    if((size = getdents64(fd,&buffer[8],sizeof(buffer) - 8)) < 0)
       return (close(fd),write(stdout,"Can't get the data!\n",0));
+retry:
    while(i < size + 5)
    {
       if(first == 5){
@@ -60,6 +61,9 @@ int main(int argc,const char *argv[])
       write(stdout,"\t",0);
       i += length + 3;
    }
+   if((size = getdents64(fd,&buffer[8],sizeof(buffer) - 8)) > 0 &&
+      (i = 8))
+      goto retry; /*Read until there is no data.*/
    close(fd);
    write(stdout,"\n",0); /*Print a '\n'.*/
    return 0;

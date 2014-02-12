@@ -59,7 +59,8 @@ static int ttyTaskFunction(void *data)
             break;
          case 2:
             queue->data =
-               frameBufferWriteString(queue->s);
+               frameBufferWriteStringInColor(
+                     0xff,0xff,0xff,queue->s,queue->data);
             if(queue->task) /*Is the task waiting?*/
                wakeUpTask(queue->task);
             else
@@ -136,7 +137,7 @@ int ttyKeyboardPress(KeyboardCallback *callback,u8 data)
 int ttyWrite(VFSFile *file,const void *string,u64 size)
 {
    u64 rflags;
-   u8 len = strlen(string);
+   u8 len = size ? size : strlen(string);
    if(len == 0)
       return 0;
    char *s = kmalloc(len + 1);
@@ -149,7 +150,7 @@ int ttyWrite(VFSFile *file,const void *string,u64 size)
    queue->type = 2;
    queue->task = 0;/*No need to wait it.*/
    queue->s = s; /*The queue and the string will be free in the tty task0*/
-   queue->data = 0;
+   queue->data = size;
    
    lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
    listAddTail(&queue->list,&ttyTaskQueue);

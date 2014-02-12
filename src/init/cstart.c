@@ -111,13 +111,14 @@ int kmain(u64 magic,u8 *address)
       }
    }
 
-   if(!fb || !mmap)    /*return if there is no enough information.*/
+   if(!fb || !mmap)    /*Return if there is no enough information.*/
       return -EINVAL;
 
    calcMemorySize(mmap);
    initPaging();
 
-   initFrameBuffer(fb); /*Init Frame Buffer..*/
+   if((retval = initFrameBuffer(fb)))
+      return retval; /*Init Frame Buffer..*/
  
    printkInColor(0x00,0xFF,0x00, /*Green.*/
       "------------------kmain started------------------\n");

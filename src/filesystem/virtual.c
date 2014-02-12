@@ -166,7 +166,7 @@ static VFSDentry *vfsLookUp(const char *__path)
       if(*next == '\0')
          break; /*If last,break.*/
       *next = '\0'; /*It will be restored soon.*/
-      int pathLength = strlen(path);
+      int pathLength = strlen(path) + 1;
       if(path[0] == '.' && path[1] == '\0')
          goto next;
       if(path[0] == '.' && path[1] == '.' && path[2] == '\0')
@@ -212,8 +212,10 @@ static VFSDentry *vfsLookUp(const char *__path)
                ret = dentry;
                goto next;
             }
-            if(type == VFSDentryDir)
-               goto nextUnlock;
+            if(type == VFSDentryDir &&
+               (unlockSpinLock(&ret->lock) || 1) &&
+               (ret = dentry))
+               goto next;
             unlockSpinLock(&ret->lock);
             ret = dentry;
             goto failed;
@@ -238,10 +240,7 @@ static VFSDentry *vfsLookUp(const char *__path)
          listAddTail(&new->list,&ret->children);
          unlockSpinLock(&ret->lock); /*Add to parent's children list.*/
          ret = new;
-         goto next;
       }
-nextUnlock:
-      unlockSpinLock(&ret->lock);
 next:
       *next = '/'; /*Restore.*/
       path = next;
@@ -273,7 +272,7 @@ next:
       unlockSpinLock(&parent->lock);
       return parent;
    }
-   int pathLength = strlen(path);
+   int pathLength = strlen(path) + 1;
    lockSpinLock(&ret->lock);
    for(ListHead *list = ret->children.next;list != &ret->children;list = list->next)
    {
