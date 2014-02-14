@@ -22,20 +22,24 @@ static u64 systemReboot(IRQRegisters *reg);
 static u64 systemGetPID(IRQRegisters *reg);
 static u64 systemGetTimeOfDay(IRQRegisters *reg);
 static u64 systemGetDents64(IRQRegisters *reg);
+static u64 systemChdir(IRQRegisters *reg);
+static u64 systemGetCwd(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
-   systemExecve, /*0*/
-   systemOpen,
-   systemRead,
-   systemWrite,
-   systemClose,
-   systemFork,  /*5*/
-   systemExit,
-   systemWaitPID,
-   systemReboot,
-   systemGetPID,
-   systemGetTimeOfDay /*10*/,
-   systemGetDents64
+   &systemExecve, /*0*/
+   &systemOpen,
+   &systemRead,
+   &systemWrite,
+   &systemClose,
+   &systemFork,  /*5*/
+   &systemExit,
+   &systemWaitPID,
+   &systemReboot,
+   &systemGetPID,
+   &systemGetTimeOfDay /*10*/,
+   &systemGetDents64,
+   &systemChdir,
+   &systemGetCwd
 };
 
 static u64 systemOpen(IRQRegisters *reg)
@@ -111,6 +115,16 @@ static u64 systemGetTimeOfDay(IRQRegisters *reg)
 static u64 systemGetDents64(IRQRegisters *reg)
 {
    return doGetDents64((int)reg->rbx,(void *)reg->rcx,(u64)reg->rdx);
+}
+
+static u64 systemChdir(IRQRegisters *reg)
+{
+   return doChdir((const char *)reg->rbx);
+}
+
+static u64 systemGetCwd(IRQRegisters *reg)
+{
+   return doGetCwd((char *)reg->rbx,(u64)reg->rcx);
 }
 
 int doSystemCall(IRQRegisters *reg)

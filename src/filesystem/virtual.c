@@ -193,6 +193,7 @@ static VFSDentry *vfsLookUp(const char *__path)
             ret = parent;
             goto next;
          }
+         unlockSpinLock(&parent->lock);
          ret = parent;
          goto next;
       }
@@ -262,7 +263,7 @@ next:
          return parent;
       }
       lockSpinLock(&parent->lock);
-      if(atomicAdd(&ret->ref,-1) == 0)
+      if(atomicAddRet(&ret->ref,-1) == 0)
       {
          listDelete(&ret->list);
          unlockSpinLock(&parent->lock);
@@ -526,6 +527,20 @@ int doGetDents64(int fd,void *data,u64 size)
    return ((void **)__data)[0] - data;
 }
 
+int doChdir(const char *dir)
+{
+   VFSDentry *dentry = vfsLookUp(dir);
+   if(!dentry)
+      return -ENOENT;
+   if(dentry->type != VFSDentryDir)
+      return (vfsLookUpClear(dentry),-ENOTDIR);
+   Task *current = getCurrentTask();
+   if(current->fs->pwd)
+      vfsLookUpClear(current->fs->pwd);
+   current->fs->pwd = dentry;
+   return 0;
+}
+
 int doChroot(const char *dir)
 {
    VFSDentry *dentry = vfsLookUp(dir);
@@ -536,8 +551,7 @@ int doChroot(const char *dir)
    Task *current = getCurrentTask();
    vfsLookUpClear(current->fs->root);
    current->fs->root = dentry;
-   if(!current->fs->pwd)
-      current->fs->pwd = dentry;
+   doChdir("/");
    return 0;
 }
 
@@ -641,6 +655,52 @@ found:
    return 0;
 }
 
+int doGetCwd(char *buf,u64 size)
+{
+   Task *current = getCurrentTask();
+   VFSDentry *pwd = current->fs->pwd;
+   VFSDentry *root = current->fs->root;
+   const char *names[10];
+   int j = 1;
+   u8 length = 0;
+   if(size < 2)
+      return -EINVAL;
+
+   while(pwd && pwd != root) 
+   {
+      if(!pwd->parent)
+         pwd = pwd->mnt->point;
+      if(!pwd)
+         break;
+
+      if(length >= sizeof(names) / sizeof(names[0]))
+         return -EOVERFLOW;
+      names[length++] = pwd->name;
+               /*Save the file names to 'names'.*/
+      pwd = pwd->parent;
+   }
+
+   buf[0] = '/'; /*Start with the '/' char.*/
+   buf[1] = '\0';
+   if((size -= 2) == 0 && length > 0)
+      return -EOVERFLOW;
+   if(!length)
+      return 1;
+   
+   for(int i = length - 1;i >= 0;--i)
+   {
+      const char *name = names[i];
+      u8 slen = strlen(name);
+      if(j + slen + 1 > size)
+         return -EOVERFLOW; /*Add 1 for '\0' or '/'.*/
+      memcpy((void *)&buf[j],(const void *)name,slen);
+                 /*Copy the name to the buffer.*/
+      buf[j + slen] = ((i == 0) ? '\0' : '/');
+      j += slen + 1;
+   }
+   return j - 1;
+}
+
 int mountRoot(BlockDevicePart *part)
 {  /*Only use in kernel init.*/
    Task *current = getCurrentTask();
@@ -653,14 +713,16 @@ int mountRoot(BlockDevicePart *part)
       root->parent = 0;
       root->inode = 0;
       root->type = VFSDentryDir;
-      current->fs->root = current->fs->pwd = root;
+      current->fs->root = root;
+      current->fs->pwd = 0;
    }
 
    int ret = doMount("/",0,part,1);
    if(ret)
       return ret;
-   current->fs->root = current->fs->root->mnt->root;
-   current->fs->pwd = current->fs->root;
+   VFSDentry *root = current->fs->root->mnt->root;
+   current->fs->root = root;
+   current->fs->pwd = vfsLookUpDentry(root);
    return 0;
 }
 

@@ -1,17 +1,19 @@
 #include <unistd.h>
 
-#define __NR_execve 0x0
-#define __NR_open 0x1
-#define __NR_read 0x2
-#define __NR_write 0x3
-#define __NR_close 0x4
-#define __NR_fork 0x5
-#define __NR_exit  0x6
-#define __NR_waitpid 0x7
-#define __NR_reboot 0x8
-#define __NR_getpid 0x9
-#define __NR_gettimeofday 0xa
-#define __NR_getdents64 0xb
+#define __NR_execve            0x0000
+#define __NR_open              0x0001
+#define __NR_read              0x0002
+#define __NR_write             0x0003
+#define __NR_close             0x0004
+#define __NR_fork              0x0005
+#define __NR_exit              0x0006
+#define __NR_waitpid           0x0007
+#define __NR_reboot            0x0008
+#define __NR_getpid            0x0009
+#define __NR_gettimeofday      0x000a
+#define __NR_getdents64        0x000b
+#define __NR_chdir             0x000c
+#define __NR_getcwd            0x000d
 
 #define __syscall0(ret,name)  \
    ret name(void) \
@@ -69,7 +71,9 @@ __syscall1(int,exit,int,code);
 __syscall1(int,open,const char *,filename);
 __syscall1(int,close,int,fd);
 __syscall1(int,reboot,unsigned long,command);
+__syscall1(int,chdir,const char *,dir);
 __syscall2(int,gettimeofday,unsigned long *,time,void *,unused);
+__syscall2(int,getcwd,char *,buf,unsigned long,size);
 __syscall3(int,execve,const char *,path,const char **,argc,const char **,envp);
 __syscall3(unsigned long,read,int,fd,void *,buf,unsigned long,size);
 __syscall3(unsigned long,getdents64,int,fd,void *,buf,unsigned long,size);

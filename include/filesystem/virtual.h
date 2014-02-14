@@ -113,6 +113,8 @@ int doRead(int fd,void *buf,u64 size);
 int doLSeek(int fd,u64 offset);
 int doGetDents64(int fd,void *data,u64 size);
 int doWrite(int fd,const void *buf,u64 size);
+int doChdir(const char *dir);
+int doGetCwd(char *buffer,u64 size);
 
 VFSFile *openFile(const char *path);
 int readFile(VFSFile *file,void *buf,u64 size);

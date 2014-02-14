@@ -19,3 +19,5 @@ int reboot(unsigned long command);
 int getpid(void);
 int gettimeofday(unsigned long *time,void *unused);
 unsigned long getdents64(int fd,void *buf,unsigned long size);
+int chdir(const char *dir);
+int getcwd(char *buffer,unsigned long size);
