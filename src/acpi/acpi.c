@@ -84,10 +84,7 @@ static u8 *hpetAddress = 0;
 
 static int parseApic(ACPIHeaderApic *apic)
 {
-   char temp[20];
-   temp[0] = '0';temp[1] = 'x';
-   itoa(apic->localApicAddress,temp + 2,0x10,8,'0',1);
-   printk("\nLocal Apic Address: %s\n",temp);
+   printk("\nLocal Apic Address: 0x%08x\n",apic->localApicAddress);
    localApicAddress = (u8 *)pa2va(apic->localApicAddress);
 
    u8 *start = apic->data;
@@ -109,9 +106,8 @@ static int parseApic(ACPIHeaderApic *apic)
       case APIC_TYPE_IO_APIC:
          {
             IOApic *ioApic = (IOApic *)apicHeader;
-            itoa(ioApic->ioApicAddress,temp + 2,0x10,8,'0',1);
-            printk("Found I/O Apic : I/O Apic ID => %d, I/O Apic Address => %s\n",
-               (int)ioApic->ioApicID,temp);
+            printk("Found I/O Apic : I/O Apic ID => %d, I/O Apic Address => 0x%08x\n",
+               (int)ioApic->ioApicID,ioApic->ioApicAddress);
             ioApicAddress = (u8 *)pa2va(ioApic->ioApicAddress);
             break;
          }
@@ -133,15 +129,11 @@ static int parseApic(ACPIHeaderApic *apic)
 
 static int parseHpet(ACPIHeaderHpet *hpet)
 {
-   char temp[20];
-   temp[0] = '0';
-   temp[1] = 'x';
    u16 t = hpet->minTickInPeriodicMode;
    pointer address = (pointer)hpet->baseAddress.address;
    hpetAddress = (u8 *)pa2va(address);
-   itoa(address,temp + 2,0x10,16,'0',1);
-   printk("\nFound HPET:Address => %s,Min Tick In Periodic Mode => %d.\n",
-      temp,t);
+   printk("\nFound HPET:Address => 0x%016x,Min Tick In Periodic Mode => %d.\n",
+      address,t);
 
    return 0;
 }

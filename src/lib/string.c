@@ -85,7 +85,7 @@ void *memset(void *mem,u8 c,u64 len)
    return mem;
 }
 
-char *itoa(long long val, char *buf, unsigned int radix,
+char *itoa(unsigned long long val, char *buf, unsigned int radix,
    char alignType,char alignChar,char isUnsigned)
 /* alignType = 0  no align
  * alignType > 0 align:left,complete -alignType bits with alignChar
@@ -96,7 +96,7 @@ char *itoa(long long val, char *buf, unsigned int radix,
    char *start;
    if(!alignChar)
       alignChar = ' '; /*The default value of alignChar is ' '.*/
-   if((val < 0) && !isUnsigned)
+   if(((long long)val < 0) && !isUnsigned)
    {
       *(buf++) = '-';
       val = -val;
@@ -111,7 +111,7 @@ char *itoa(long long val, char *buf, unsigned int radix,
          *(buf++) = (char)(bit - 10 + 'a');
       else
          *(buf++) = (char)(bit - 0 + '0');
-   }while(val > 0);
+   }while(val != 0);
    if(alignType > 0)
    {
       while((int)(buf - start) < alignType)

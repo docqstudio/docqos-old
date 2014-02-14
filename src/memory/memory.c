@@ -48,10 +48,8 @@ static int parseMemoryInformation(void)
 
 static int displayMemoryInformation(void)
 {
-   char buf[256];
    u64 base,limit;
    u32 type;
-   buf[0] = '0';buf[1] = 'x';
    printk("\nDisplaying memory information...\n");
    printkInColor(0x00,0xFF,0x00,"Base Address:      Limit:             Type:\n");
    for(int i = 0;i < memoryMap->count; ++i)
@@ -59,17 +57,10 @@ static int displayMemoryInformation(void)
       base = memoryMap->entries[i].address;
       limit = memoryMap->entries[i].length;
       type = memoryMap->entries[i].type;
-      itoa(base,buf + 2,0x10,16,'0',1);
-      printk("%s ",buf);
-      itoa(limit,buf + 2,0x10,16,'0',1);
-      printk("%s ",buf);
-      itoa(type,buf + 2,0x10,8,'0',1);
-      printk("%s\n",buf);
+      printk("0x%016lx 0x%016lx 0x%08lx\n",base,limit,type);
    }
-   itoa(memorySize,buf + 2,0x10,16,'0',1);
-   printkInColor(0x00,0xFF,0xFF,"Memory size: %s bytes",buf);
-   itoa(memorySize / 1024 / 1024 + 1,buf,10,0,' ',1);
-   printkInColor(0x00,0xFF,0xFF,"(About %s MB).\n",buf);
+   printkInColor(0x00,0xFF,0xFF,"Memory size: 0x%016lx bytes",memorySize);
+   printkInColor(0x00,0xFF,0xFF,"(About %ld MB).\n",memorySize / 1024 / 1024 + 1);
 
    return 0;
 }
@@ -111,7 +102,7 @@ int initMemory(void)
    void *obj0 = kmalloc(16);
    void *obj2 = kmalloc(100);
 
-   printk("Obj0:%x Obj1:%x Obj2:%x\n",obj0,obj1,obj2);
+   printk("Obj0:0x%p Obj1:0x%p Obj2:0x%p\n",obj0,obj1,obj2);
 
    printk("Try to use kfree.....\n");
 

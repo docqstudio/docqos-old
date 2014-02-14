@@ -42,9 +42,6 @@ int handleException(IRQRegisters *regs)
 {
    u8 vector = (regs->irq >> 56) & 0xff;
    const char *type;
-   char buf[32];
-   buf[0] = '0';
-   buf[1] = 'x';
 
    regs->irq &= 0x00fffffffffffffful;
    if(vector < sizeof(doExceptions) / sizeof(doExceptions[0]))
@@ -60,45 +57,24 @@ int handleException(IRQRegisters *regs)
    printkInColor(0xff,0x00,0x00,"\n\nException!!!!!!! Type:%s\nRegisters:\n",
       type);
 
-#define printr(reg)                                       \
-   do{                                                    \
-      itoa(regs->reg,buf + 2,0x10,16,'0',1);               \
-      printkInColor(0xff,0x00,0x00,#reg "=> %s ",buf);    \
-   }while(0)
+   printkInColor(0xff,0x00,0x00,
+      "rax=> 0x%016lx,rbx=> 0x%016lx,rcx=> 0x%016lx,rdx=> 0x%016lx\n",
+      regs->rax,regs->rbx,regs->rcx,regs->rdx);
+   printkInColor(0xff,0x00,0x00,
+      "rbp=> 0x%016lx,rsi=> 0x%016lx,rdi=> 0x%016lx,rsp=> 0x%016lx\n",
+      regs->rbp,regs->rsi,regs->rdi,regs->rsp);
+   printkInColor(0xff,0x00,0x00,
+      "rflags=> 0x%016lx,rip=> 0x%016lx\n",
+      regs->rflags,regs->rip);
 
-   printr(rax);
-   printr(rbx);
-   printr(rcx);
-   printr(rdx);
-   printk("\n");
-   printr(rbp);
-   printr(rsi);
-   printr(rdi);
-   printr(rsp);
-   printk("\n");
-   printr(rflags);
-   printr(rip);
-   printk("\n");
-
-#undef printr
-
-#define printr(reg)                                      \
-   do{                                                   \
-      itoa(regs->reg,buf + 2,0x10,4,'0',1);               \
-      printkInColor(0xff,0x00,0x00, #reg "=> %s ",buf);  \
-   }while(0)
-
-   printr(cs);
-   printr(ss);
-   printk("\n");
-
-#undef printr
+   printkInColor(0xff,0x00,0x00,
+      "cs=> 0x%04x,ss=> 0x%04x\n",
+      regs->cs,regs->ss);
 
    if(regs->irq)
-   {
-      itoa(regs->irq,buf + 2,0x10,4,'0',1);
-      printkInColor(0xff,0x00,0x00,"Error Code=> %s\n",buf);
-   }
+      printkInColor(0xff,0x00,0x00,
+         "Error Code=> 0x%04x",
+         regs->irq);
    for(;;);
    return 0;
 }

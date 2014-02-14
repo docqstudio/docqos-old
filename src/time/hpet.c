@@ -159,9 +159,7 @@ int initHpet(IRQHandler handler,unsigned int hz)
 
    unsigned long long hpetFreq = FSEC_PER_SEC;
    hpetFreq = hpetFreq / period;
-   char temp[20];
-   itoa(hpetFreq,temp,10,0,0,1);
-   printk("Freq: %s\n",temp);
+   printk("Freq: %llu\n",hpetFreq);
 
    hz = hpetFreq / hz;
 
@@ -180,8 +178,7 @@ int initHpet(IRQHandler handler,unsigned int hz)
       return -ENOSTR;
    }
 
-   itoa(counter,temp,0x10,16,'0',1);
-   printk("We waited a minute,now counter is 0x%s\n",temp);
+   printk("We waited a minute,now counter is 0x%016lx\n",counter);
 
    if(requestIRQ(TIMER0_IRQ,handler))
    {
