@@ -2,8 +2,9 @@
 
 int shell(void);
 
-int main(void)
+int main(int argc,char *argv[])
 {
+   if(argc == 0) /*Run from kernel.*/
    { /*Try to open stdin and stdout.*/
       int fd1 = open("/dev/tty");
       int fd2 = open("/dev/tty");
@@ -21,8 +22,41 @@ int main(void)
             close(fd1);
          close(fd2);
          return -1;
+      }/*Now we have opened stdin and stdout.*/
+   }else { /*Run from user.*/
+      if(argc != 2)
+         goto usage;
+      if(argv[1][0] == '\0' || argv[1][1] != '\0')
+         goto usage;
+      if(argv[1][0] < '0' || argv[1][0] > '6')
+         goto usage;
+      int mode = argv[1][0] - '0';
+      static char information[] = "Switching to Run Level 0.\n";
+      information[23] = argv[1][0];
+      write(stdout,information,0);
+      if(mode > 0 && mode < 6)
+         exit(0); /*Just do nothing.*/
+      switch(mode)
+      {
+      case 0: /*Halt the system.*/
+         write(stdout,"Halting......\n",0);
+         reboot(REBOOT_POWEROFF_COMMAND);
+         break;
+      case 6: /*Reboot the system.*/
+         write(stdout,"Rebooting......\n",0);
+         reboot(REBOOT_REBOOT_COMMAND);
+         break;
+      default: /*It should never arrive here.*/
+         goto usage;
       }
-   } /*Now we have opened stdin and stdout.*/
+      exit(0);
+usage:
+      write(stdout,"Usage: init [Run Level]\n",0);
+      write(stdout,"      Run Level: The run level you want to switch.\n",0);
+      write(stdout,"                 Now we support 0 - 6.\n",0);
+      write(stdout,"                 0:Halt,6:Reboot,1-5:Nothing.\n",0);
+      exit(-1);
+   }
    write(stdout,"Welcome to DOCQ OS.\n",0);
    shell();
    close(stdin);
@@ -59,8 +93,22 @@ int shellCommandCd(const char *dir)
    return retval;
 }
 
+int shellCommandNeedLookForPath(const char *path)
+{
+   char c;
+   while((c = *path++) != '\0')
+      if(c == '/')
+         return 0; /*No need.*/
+   return 1; /*Need!!*/
+}
+
 int shellRunCommand(char *cmd)
 {
+   static char pathenv[][64] = {
+      "/bin/",
+      "/sbin/"
+   };
+
    while(*cmd == ' ')
       ++cmd; /*Skip ' '.*/
    if(*cmd == '\0')
@@ -82,7 +130,25 @@ int shellRunCommand(char *cmd)
    else if(pid > 0) /*Parent process.*/
       return (waitpid(pid,&ret,0),ret); /*Wait for the child process.*/
 
+   int fd;
+   if(!shellCommandNeedLookForPath(argv[0]))
+      fd = open(argv[0]);
+   else for(int i = 0;i < sizeof(pathenv) / sizeof(pathenv[0]);++i)
+   {
+      int j = 0;
+      do{
+         pathenv[i][j + 5 + i] = argv[0][j]; /*Copy it!*/
+      }while(argv[0][++j] != 0);
+      fd = open(pathenv[i]); /*Exists?*/
+      if(fd >= 0 && (argv[0] = pathenv[i]))
+         break;
+   }
+   if(fd < 0)
+      goto out;
+   close(fd);
+
    execve(argv[0],argv,0);
+out:
    write(stdout,"Bad Command!!!\n",0);
             /*Can't execve?Maybe this is a bad command.*/
    exit(0);
@@ -104,15 +170,7 @@ int shell(void)
       cwd[28 + i] = '\0';
       write(stdout,cwd,0);
       read(stdin,(void *)cmd,sizeof(cmd) - 3);
-
-      if(cmd[0] == 'r' && cmd[1] == 'e' && cmd[2] == 'b' &&
-         cmd[3] == 'o' && cmd[4] == 'o' && cmd[5] == 't' &&
-         cmd[6] == '\0') /*Reboot command.*/
-         reboot(REBOOT_REBOOT_COMMAND);
-      if(cmd[0] == 's' && cmd[1] == 'h' && cmd[2] == 'u' &&
-         cmd[3] == 't' && cmd[4] == 'd' && cmd[5] == 'o' &&
-         cmd[6] == 'w' && cmd[7] == 'n' && cmd[8] == '\0') /*Shutdown command.*/
-         reboot(REBOOT_POWEROFF_COMMAND);
+      
       shellRunCommand((char *)cmd); /*Try to run this command.*/
    }
    write(stdout,"Goodbye!\n",0);

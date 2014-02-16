@@ -1,6 +1,6 @@
 ROOT=../..
 include $(ROOT)/Makefile.config
-TARGET=$(ROOT)/bin/date
+TARGET=$(ROOT)/bin/bin/date
 OBJS=.obj/date.o
 
 first:cachedir $(TARGET)

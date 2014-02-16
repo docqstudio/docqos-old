@@ -523,7 +523,8 @@ int doPageFault(IRQRegisters *reg)
    {
       pos = address & ~0xfff;
       pos -= vma->start;
-      if(lseekFile(file,pos > 0 ? pos : -pos))
+      pos += vma->offset;
+      if(lseekFile(file,pos > 0 ? pos : -pos) < 0)
          return -EIO;
    }
 

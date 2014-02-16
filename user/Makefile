@@ -1,7 +1,10 @@
 ROOT=..
 include $(ROOT)/Makefile.config
 
-first:dir_lib dir_init dir_date dir_echo dir_ls dir_cat
+first:dir_bin dir_lib dir_init dir_date dir_echo dir_ls dir_cat
+
+dir_bin:
+	mkdir -p $(ROOT)/bin/bin
 
 dir_init:
 	cd init && $(MAKE) -f Makefile

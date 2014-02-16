@@ -20,7 +20,7 @@ brun:first
 clean:dir_src_clean dir_user_clean
 
 clean_all:clean
-	$(RM) src/Makefile
+	$(RM) src/Makefile bin/bin
 	$(RM) parport.out os.iso map.map bochsout.txt $(KERNEL_ELF) user/lib/lib*.a
 	$(RM) `ls -al bin | sed '1d' | awk '{if(substr($$0,0,1)!="d" && substr($$0,10,1)=="x")printf "bin/"$$9" "}END{printf "\n"}'`
 	$(RM) `ls -al bin/sbin | sed '1d' | awk '{if(substr($$0,0,1)!="d" && substr($$0,10,1)=="x")printf "bin/sbin/"$$9" "}END{printf "\n"}'`

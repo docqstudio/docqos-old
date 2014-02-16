@@ -1,6 +1,6 @@
 ROOT=../..
 include $(ROOT)/Makefile.config
-TARGET=$(ROOT)/bin/ls
+TARGET=$(ROOT)/bin/bin/ls
 OBJS=.obj/ls.o
 
 first:cachedir $(TARGET)
