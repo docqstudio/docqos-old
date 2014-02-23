@@ -14,6 +14,9 @@ inline int atomicSub(AtomicType *atomic,int data) __attribute__ ((always_inline)
 inline int atomicAddRet(AtomicType *atomic,int data) __attribute__ ((always_inline));
 inline int atomicSubRet(AtomicType *atomic,int data) __attribute__ ((always_inline));
 
+inline int atomicCompareExchange(AtomicType *atomic,int old,int new)
+                              __attribute__ ((always_inline));
+
 inline int atomicRead(AtomicType *atomic)
 {
    return atomic->data;
@@ -59,4 +62,15 @@ inline int atomicAddRet(AtomicType *atomic,int data)
 inline int atomicSubRet(AtomicType *atomic,int data)
 {
    return atomicAddRet(atomic,-data);
+}
+
+inline int atomicCompareExchange(AtomicType *atomic,int old,int new)
+{
+   int retval;
+   asm volatile(
+      "lock;cmpxchg %%ecx,(%%rbx)"
+      : "=a" (retval)
+      : "a" (old),"c" (new), "b"(&atomic->data)
+   );
+   return retval;
 }

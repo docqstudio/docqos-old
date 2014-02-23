@@ -248,7 +248,7 @@ int schedule(void)
 }
 
 int scheduleTimeout(int ms)
-{
+{     /*Before call this function,we must set the current task's state to TaskStopping.*/
    Timer timer;
    Task *current = getCurrentTask();
    unsigned long long expire;
@@ -259,12 +259,8 @@ int scheduleTimeout(int ms)
    initTimer(&timer,&scheduleTimeoutCallback,ms,(void *)current);
              /*Init a timer.*/
    expire = timer.ticks;
-   disablePreemption();
-           /*When we set current's state and add timer,this task can't be scheduled.*/
-   current->state = TaskStopping; /*If it is scheduled,never return.*/
    addTimer(&timer);
    
-   enablePreemption();
    schedule();
 
    removeTimer(&timer);

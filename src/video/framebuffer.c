@@ -242,7 +242,7 @@ int frameBufferDrawString(u8 red,u8 green,u8 blue,int x,int y,const char *string
 }
 
 int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string,
-                                      u64 size)
+                                      u64 size,u8 refresh)
 {
    char c;
    const u32 width = frameBufferTag->width;
@@ -364,7 +364,8 @@ int frameBufferWriteStringInColor(u8 red,u8 green,u8 blue,const char *string,
       sy = y;
       y = tmp;
    }
-   frameBufferRefresh(0,sy,width,y);
+   if(refresh)
+      frameBufferRefresh(0,sy,width,y);
 
    upSemaphore(&frameBufferDisplayLock);
    return 0;

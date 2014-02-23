@@ -1,12 +1,59 @@
 #include <core/const.h>
+#include <core/hlist.h>
+#include <cpu/rcu.h>
 #include <filesystem/block.h>
 #include <filesystem/virtual.h>
 #include <memory/kmalloc.h>
 #include <task/task.h>
 #include <lib/string.h>
 
+#define VFS_DENTRY_CACHE_COUNT 1024
+#define VFS_DENTRY_CACHE_MASK  1023
+
 static ListHead fileSystems; 
 /*A list of file systems which has registered.*/
+static HashListHead vfsDentryCache[VFS_DENTRY_CACHE_COUNT];
+                    /*Dentry Cache Hash Table.*/
+static RCULock vfsDentryCacheRCU; /*For reading.*/
+static SpinLock vfsDentryCacheLock; /*For writing.*/
+
+static u64 vfsHashName(const char *name,u64 *phash)
+{
+   u64 retval = 0,hash = 0;
+   unsigned long c;
+   while((c = *name++) != '\0')
+   {
+      hash = (hash + (c << 4) + (c >> 4)) * 11;
+      ++retval; 
+   }
+   *phash = hash;
+   return retval; /*Return the length of name.*/
+}
+
+static u64 __vfsHashDentry(VFSDentry *parent,u64 hash)
+{
+   hash += (u64)parent / (1 << 7);
+   hash += hash >> 32;
+   hash &= VFS_DENTRY_CACHE_MASK; /*Mask the hash number.*/
+   return hash;
+}
+
+static int vfsHashDentry(VFSDentry *dentry)
+{
+   u64 hash = __vfsHashDentry(dentry->parent,dentry->hash);
+   lockSpinLock(&vfsDentryCacheLock);
+   hashListHeadAdd(&dentry->node,&vfsDentryCache[hash]); /*Add to the dentry cache.*/
+   unlockSpinLock(&vfsDentryCacheLock);
+   return 0;
+}
+
+static int vfsUnhashDentry(VFSDentry *dentry)
+{
+   lockSpinLock(&vfsDentryCacheLock);
+   hashListDelete(&dentry->node);  /*Delete from the dentry cache.*/
+   unlockSpinLock(&vfsDentryCacheLock);
+   return 0;
+}
 
 static VFSDentry *createDentry(void)
 {
@@ -19,22 +66,38 @@ static VFSDentry *createDentry(void)
       kfree(dentry);
       return 0;
    } /*Init some fields.*/
-   initSpinLock(&dentry->lock);
-   initList(&dentry->list);
-   initList(&dentry->children);
+   initHashListNode(&dentry->node);
    atomicSet(&dentry->ref,1); /*Reference count.*/
    dentry->name = 0;
    dentry->mnt = 0;
+   dentry->mounted = 0;
    initSemaphore(&dentry->inode->semaphore);
    return dentry;
 }
 
-static int destoryDentry(VFSDentry *dentry)
+static int __destoryDentry(void *data)
 {
+   VFSDentry *dentry = data;
    if(dentry->name)
       kfree(dentry->name);
    kfree(dentry->inode);
-   return kfree(dentry); /*Kfree them.*/
+   return kfree(dentry); /*Free them.*/
+}
+
+static int destoryDentry(VFSDentry *dentry)
+{
+   int old;
+   do {
+      old = atomicRead(&dentry->ref);
+      if(old != 0)  /*Can not destory the dentries which are used.*/
+         return -EBUSY;
+   } while(atomicCompareExchange(&dentry->ref,old,-1) != old);
+
+   if(!hashListEmpty(&dentry->node))
+      vfsUnhashDentry(dentry); /*Unhash.*/
+   else
+      return __destoryDentry(dentry);
+   return addRCUCallback(&vfsDentryCacheRCU,&__destoryDentry,dentry);
 }
 
 static FileSystemMount *createFileSystemMount(void)
@@ -67,8 +130,40 @@ static int destoryFileSystemMount(FileSystemMount *mnt)
       unlockSpinLock(&mnt->fs->lock);
    }
    if(need)
-      destoryDentry(mnt->root);
+      __destoryDentry(mnt->root);
    return kfree(mnt);
+}
+
+static VFSDentry *vfsDentryCacheLookUp(VFSDentry *parent,u64 hash,const char *s,u64 length)
+{
+   int old;
+   VFSDentry *retval = 0;
+   FileSystemMount *mnt = 0;
+   u64 dhash = __vfsHashDentry(parent,hash);
+   lockRCUReadLock(&vfsDentryCacheRCU);
+   for(HashListNode *node = vfsDentryCache[dhash].first;node;node = node->next)
+   {    /*Look for the dentry cache.*/
+      VFSDentry *dentry = hashListEntry(node,VFSDentry,node);
+      if(dentry->hash == hash && memcmp(dentry->name,s,length) == 0)
+      {
+         do {
+            old = atomicRead(&dentry->ref);
+            if(old < 0) /*The dentry is destorying,discard it!*/
+               break;
+         } while(atomicCompareExchange(&dentry->ref,old,old + 1) != old);
+         if(old < 0)
+            continue; /*Destorying.*/
+         if(old & (1 << 16)) /*Mounted?*/
+            while((mnt = *(FileSystemMount *volatile *)&dentry->mounted) == 0)
+               ; /*Wait for the dentry->mounted set..*/
+         if(mnt)
+            dentry = mnt->root;
+         retval = dentry;
+         break;
+      }
+   }
+   unlockRCUReadLock(&vfsDentryCacheRCU);
+   return retval;
 }
 
 static int vfsLookUpClear(VFSDentry *dentry)
@@ -78,16 +173,12 @@ static int vfsLookUpClear(VFSDentry *dentry)
    {
       while((parent = dentry->parent))
       {
-         lockSpinLock(&parent->lock);
          if(atomicAddRet(&dentry->ref,-1) == 0)
          { /*If reference count is zero,destory it.*/
-            listDelete(&dentry->list);
-            unlockSpinLock(&parent->lock);
             destoryDentry(dentry);
             dentry = parent;
             continue;
          }
-         unlockSpinLock(&parent->lock);
          dentry = parent;
       }
 
@@ -97,11 +188,7 @@ static int vfsLookUpClear(VFSDentry *dentry)
       else
          point = dentry;
 
-      if(point->parent)
-         lockSpinLock(&point->parent->lock);
       atomicAdd(&point->ref,-1); /*It should never be 0.*/
-      if(point->parent)
-         unlockSpinLock(&point->parent->lock);
       dentry = point->parent;
    }
    return 0;
@@ -114,9 +201,7 @@ static VFSDentry *vfsLookUpDentry(VFSDentry *dentry)
    {
       while((parent = child->parent))
       {
-         lockSpinLock(&parent->lock);
          atomicAdd(&child->ref,1); /*Add the reference count.*/
-         unlockSpinLock(&parent->lock);
          child = parent;
       }
       
@@ -126,11 +211,7 @@ static VFSDentry *vfsLookUpDentry(VFSDentry *dentry)
       else
          point = child;
       
-      if(point->parent)
-         lockSpinLock(&point->parent->lock);
       atomicAdd(&point->ref,1); /*Add the reference count,too!*/
-      if(point->parent)
-         unlockSpinLock(&point->parent->lock);
       child = point->parent;
    }
    return dentry;
@@ -140,16 +221,18 @@ static VFSDentry *vfsLookUp(const char *__path)
 {
    if(*__path == '\0')
       return 0;
+   Task *current = getCurrentTask();
    VFSDentry *ret,*new;
    u8 length = strlen(__path);
    char ___path[length + 1];
    char *path = ___path; 
+   u64 hash;
    u8 error = 0; /*Copy path for writing.*/
    memcpy((void *)path,(const void *)__path,length + 1);
    if(*path == '/')
-      ret = getCurrentTask()->fs->root;
+      ret = current->fs->root;
    else
-      ret = getCurrentTask()->fs->pwd;
+      ret = current->fs->pwd;
    if(!ret)
       return 0;
    ret = vfsLookUpDentry(ret);
@@ -166,7 +249,7 @@ static VFSDentry *vfsLookUp(const char *__path)
       if(*next == '\0')
          break; /*If last,break.*/
       *next = '\0'; /*It will be restored soon.*/
-      int pathLength = strlen(path) + 1;
+      int pathLength = vfsHashName(path,&hash) + 1;
       if(path[0] == '.' && path[1] == '\0')
          goto next;
       if(path[0] == '.' && path[1] == '.' && path[2] == '\0')
@@ -176,72 +259,57 @@ static VFSDentry *vfsLookUp(const char *__path)
          { /*Now there are two logical possiblities:*/
            /*1. The 'dentry' is the root dentry.*/
            /*2. The 'dentry' is the root dentry for a FileSystemMount.*/
-            parent = ret->mnt->point->parent;
-            if(!parent)  /*The first possiblity,just goto next.*/
-               goto next;
+            if(!ret->mnt->point->parent || ret == current->fs->root)  
+               goto next; /*The first possiblity,just goto next.*/
             FileSystemMount *mnt = ret->mnt;
             atomicAdd(&mnt->point->ref,-1); /*It should never be zero.*/
-            ret = parent;
+            ret = mnt->point->parent;
             goto next;
          }
-         lockSpinLock(&parent->lock);
          if(atomicAddRet(&ret->ref,-1) == 0)
          { /*Destory the dentry if the reference count is zero.*/
-            listDelete(&ret->list);
-            unlockSpinLock(&parent->lock);
             destoryDentry(ret);
             ret = parent;
             goto next;
          }
-         unlockSpinLock(&parent->lock);
          ret = parent;
          goto next;
       }
-      lockSpinLock(&ret->lock);
-      for(ListHead *list = ret->children.next;list != &ret->children;list = list->next)
+      VFSDentry *dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+      if(dentry)
       {
-         VFSDentry *dentry = listEntry(list,VFSDentry,list);
-         if(memcmp(dentry->name,path,pathLength) == 0)
-         { /*Search ret->children.*/
-            atomicAdd(&dentry->ref,1);
-            const VFSDentryType type = dentry->type;
-            if(type == VFSDentryMount)
-            { /*A mount point!*/
-               FileSystemMount *mnt = dentry->mnt;
-               dentry = mnt->root;
-               unlockSpinLock(&ret->lock);
-               ret = dentry;
-               goto next;
-            }
-            if(type == VFSDentryDir &&
-               (unlockSpinLock(&ret->lock) || 1) &&
-               (ret = dentry))
-               goto next;
-            unlockSpinLock(&ret->lock);
-            ret = dentry;
-            goto failed;
-         }
+         const VFSDentryType type = dentry->type;
+         if(type == VFSDentryDir &&
+            (ret = dentry))
+            goto next;
+         ret = dentry;
+         goto failed;
       }
-      unlockSpinLock(&ret->lock);
+      downSemaphore(&ret->inode->semaphore);
+      dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+                /*Look for the dentry cache again.*/
+      if(likely(!dentry))
       {
          new = createDentry();
-         if(unlikely(!new))
+         if(unlikely(!new) && (upSemaphore(&ret->inode->semaphore) || 1))
             goto failed;
          error = (*ret->inode->operation->lookUp)(ret,new,path);
-         if(error || new->type != VFSDentryDir) /*Try to look it up in disk.*/
+         if((error || new->type != VFSDentryDir) && (upSemaphore(&ret->inode->semaphore) || 1)) 
+                                                    /*Try to look it up in disk.*/
             goto failedWithNew;
          new->parent = ret;
          new->mnt = ret->mnt;
          char *name = (char *)kmalloc(pathLength + 1);
-         if(unlikely(!name)) /*If no memory for name,exit.*/
+         if(unlikely(!name) && (upSemaphore(&ret->inode->semaphore) || 1)) /*If no memory for name,exit.*/
             goto failedWithNew;
          memcpy((void *)name,(const void *)path,pathLength + 1);
          new->name = name;
-         lockSpinLock(&ret->lock);
-         listAddTail(&new->list,&ret->children);
-         unlockSpinLock(&ret->lock); /*Add to parent's children list.*/
-         ret = new;
+         new->hash = hash; /*The hash number.*/
+         vfsHashDentry(new);
+         dentry = new;
       }
+      upSemaphore(&ret->inode->semaphore);
+      ret = dentry;
 next:
       *next = '/'; /*Restore.*/
       path = next;
@@ -254,70 +322,51 @@ next:
       VFSDentry *parent = ret->parent;
       if(!parent)
       {
-         parent = ret->mnt->point->parent;
-         if(!parent)
+         if(!ret->mnt->point->parent || ret == current->fs->root) /*The root dentry.*/
             return ret;
-         lockSpinLock(&parent->lock);
          atomicAdd(&ret->mnt->point->ref,-1);
-         unlockSpinLock(&parent->lock);
-         return parent;
+         return ret->mnt->point->parent;
       }
-      lockSpinLock(&parent->lock);
       if(atomicAddRet(&ret->ref,-1) == 0)
       {
-         listDelete(&ret->list);
-         unlockSpinLock(&parent->lock);
          destoryDentry(ret);
          return parent;
       }
-      unlockSpinLock(&parent->lock);
       return parent;
    }
-   int pathLength = strlen(path) + 1;
-   lockSpinLock(&ret->lock);
-   for(ListHead *list = ret->children.next;list != &ret->children;list = list->next)
-   {
-      VFSDentry *dentry = listEntry(list,VFSDentry,list);
-      if(memcmp(dentry->name,path,pathLength) == 0)
-      { 
-         atomicAdd(&dentry->ref,1);
-         if(dentry->type == VFSDentryMount)
-         { /*Get the really dir.*/
-            FileSystemMount *mnt = dentry->mnt;
-            dentry = mnt->root;
-            unlockSpinLock(&ret->lock);
-            ret = dentry;
-            goto found;
-         }
-         unlockSpinLock(&ret->lock);
-         ret = dentry;
-         goto found; /*Found!! Just return.*/
-      }
-   }
-   unlockSpinLock(&ret->lock);
+   int pathLength = vfsHashName(path,&hash) + 1;
+   VFSDentry *dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+   if(dentry && (ret = dentry))
+      goto found; /*Found!! Just return.*/
+   downSemaphore(&ret->inode->semaphore);
+   dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+                        /*Look for the dentry cache again.*/
+   if(likely(!dentry))
    {
       new = createDentry(); /*Alloc a new dentry.*/
-      if(unlikely(!new))
+      if(unlikely(!new) && (upSemaphore(&ret->inode->semaphore) || 1))
          goto failed;
       error = (*ret->inode->operation->lookUp)(ret,new,path);
-      if(error)
+      if(error && (upSemaphore(&ret->inode->semaphore) || 1))
          goto failedWithNew;
       new->parent = ret;
       new->mnt = ret->mnt;
       char *name = (char *)kmalloc(pathLength);
-      if(unlikely(!name)) /*Fill the name field.*/
+      if(unlikely(!name) && (upSemaphore(&ret->inode->semaphore) || 1)) 
+                                 /*Fill the name field.*/
          goto failedWithNew;
       memcpy((void *)name,(const void *)path,pathLength);
       new->name = name;
-      lockSpinLock(&ret->lock);
-      listAddTail(&new->list,&ret->children); /*Add it.*/
-      unlockSpinLock(&ret->lock);
-      ret = new;
+      new->hash = hash;
+      vfsHashDentry(new);
+      dentry = new;
    }
+   upSemaphore(&ret->inode->semaphore);
+   ret = dentry;
 found:
    return ret;
 failedWithNew:
-   destoryDentry(new);
+   __destoryDentry(new);
 failed: /*Failed.*/
    vfsLookUpClear(ret);
    return 0;
@@ -343,6 +392,10 @@ static int vfsFillDir64(void *__data,u8 isDir,u64 length,const char *name)
 
 static int initVFS(void)
 { /*Init this list.*/
+   initSpinLock(&vfsDentryCacheLock);
+   initRCULock(&vfsDentryCacheRCU);
+   for(int i = VFS_DENTRY_CACHE_COUNT - 1;i >= 0;--i)
+      initHashListHead(&vfsDentryCache[i]);
    return initList(&fileSystems);
 }
 
@@ -410,8 +463,7 @@ VFSFile *openFile(const char *path)
 
 int readFile(VFSFile *file,void *buf,u64 size)
 {
-   if(file->dentry->type == VFSDentryDir ||
-      file->dentry->type == VFSDentryMount)
+   if(file->dentry->type == VFSDentryDir)
       return -EISDIR;
    if(!file->operation->read)
       return -EBADFD;
@@ -559,7 +611,7 @@ int doUMount(const char *point)
 {
    if(point[0] == '/' && point[1] == '\0')
       return -EPERM; /*Can not umount / .*/
-   int ret;
+   int ret,old;
    VFSDentry *dentry = vfsLookUp(point);
    FileSystemMount *mnt; /*Look for this dentry*/
    ret = -EINVAL;
@@ -567,19 +619,16 @@ int doUMount(const char *point)
       goto out;
    dentry = dentry->mnt->point;
    ret = -EBUSY;
-   lockSpinLock(&dentry->parent->lock);
-   if(atomicRead(&dentry->ref) > 2)
-      goto unlockOut; /*If this is used,failed.*/
-   dentry->type = VFSDentryDir; /*Restore to dir type.*/
+   do {
+      old = atomicRead(&dentry->ref);
+      if(old != ((1 << 16) + 2))
+         goto out; /*If this is used,failed.*/
+   }while(atomicCompareExchange(&dentry->ref,old,old - (1 << 16)) != old);
    mnt = dentry->mnt; /*Get mnt and set to the parent's mnt.*/
-   dentry->mnt = dentry->parent->mnt;
-   unlockSpinLock(&dentry->parent->lock);
    destoryFileSystemMount(mnt); /*Destory it.*/
    vfsLookUpClear(dentry);
    vfsLookUpClear(dentry);
    return 0;
-unlockOut:
-   unlockSpinLock(&dentry->lock);
 out:
    vfsLookUpClear(dentry);
    return ret;
@@ -613,7 +662,7 @@ failed:
 found:
    mnt->fs = fs;
    if(old != mnt->root)
-      destoryDentry(old);
+      __destoryDentry(old);
    if(part)
       part->fileSystem = fs;
    if(mnt->root->type != VFSDentryDir)
@@ -637,21 +686,22 @@ found:
       destoryFileSystemMount(mnt);
       return -ENOTDIR;
    }
-   if(likely(dentry->parent))
-      lockSpinLock(&dentry->parent->lock);
-   int reference = atomicRead(&dentry->ref);
-   if(!init && reference > 1)
-   {
-      if(likely(dentry->parent))
-         unlockSpinLock(&dentry->parent->lock);
-      vfsLookUpClear(dentry);
-      destoryFileSystemMount(mnt);
-      return -EBUSY;
-   }
-   dentry->mnt = mnt;
-   dentry->type = VFSDentryMount; /*Change type.*/
-   if(likely(dentry->parent))
-      unlockSpinLock(&dentry->parent->lock);
+   int ref;
+   disablePreemption();
+   if(init && (atomicSet(&dentry->ref,(1 << 16) + 2) || 1))
+      goto out;
+   do {
+      ref = atomicRead(&dentry->ref);
+      if(ref != 1)
+      {
+         vfsLookUpClear(dentry);
+         destoryFileSystemMount(mnt);
+         return -EBUSY;
+      }
+   } while(atomicCompareExchange(&dentry->ref,ref,ref + (1 << 16)) != ref);
+out:
+   dentry->mounted = mnt;
+   enablePreemption();
    return 0;
 }
 
@@ -720,7 +770,7 @@ int mountRoot(BlockDevicePart *part)
    int ret = doMount("/",0,part,1);
    if(ret)
       return ret;
-   VFSDentry *root = current->fs->root->mnt->root;
+   VFSDentry *root = current->fs->root->mounted->root;
    current->fs->root = root;
    current->fs->pwd = vfsLookUpDentry(root);
    return 0;

@@ -1,6 +1,7 @@
 #pragma once
 #include <core/const.h>
 #include <core/list.h>
+#include <core/hlist.h>
 #include <cpu/spinlock.h>
 #include <cpu/atomic.h>
 #include <task/semaphore.h>
@@ -17,7 +18,6 @@ typedef int (*VFSDirFiller)(void *data,u8 isDir,u64 length,const char *name);
 typedef enum VFSDentryType{
    VFSDentryFile,
    VFSDentryDir,
-   VFSDentryMount,
    VFSDentryBlockDevice
 } VFSDentryType;
 
@@ -57,19 +57,18 @@ typedef struct VFSFile{
 } VFSFile;
 
 typedef struct VFSDentry{
-   SpinLock lock;
    AtomicType ref;
 
    VFSDentryType type;
    VFSINode *inode;
    VFSDentry *parent;
    const char *name;
+   u64 hash;
 
    FileSystemMount *mnt; 
-      /*Only for type VFSDentryMount.*/
+   FileSystemMount *mounted;
 
-   ListHead children;
-   ListHead list;
+   HashListNode node;
 } VFSDentry;
 
 typedef struct VFSINode{

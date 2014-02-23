@@ -681,6 +681,7 @@ static int cdromTask(void *arg)
    int newStatus;
    for(;;)
    {
+      getCurrentTask()->state = TaskStopping;
       scheduleTimeout(1000); /*1 second.*/
       newStatus = cdromStatusCheck(device);
       if(status == newStatus)

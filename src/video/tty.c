@@ -8,6 +8,7 @@
 #include <lib/string.h>
 #include <filesystem/virtual.h>
 #include <filesystem/devfs.h>
+#include <time/time.h>
 
 typedef struct TTYTaskQueue{
    u8 type; /*1:Read from screen;2:Write to screen;3:Data from keyboard.*/
@@ -20,6 +21,9 @@ typedef struct TTYTaskQueue{
    };
    ListHead list;
 } TTYTaskQueue;
+
+#define TTY_REFRESH_TICKS         (TIMER_HZ / 1)
+#define TTY_REFRESH_LASTEST_TICKS (TIMER_HZ / 3)
 
 static Task *ttyTask = 0;
 static SpinLock ttyTaskQueueLock;
@@ -35,6 +39,12 @@ static VFSFileOperation ttyOperation = {
 static int ttyTaskFunction(void *data)
 {
    u64 rflags;
+   unsigned long long int ticks = 0; 
+              /*The ticks when we did the lastest refreshing.*/
+   unsigned long long int lastest = 0;
+              /*The ticks when we got the lastest writing request.*/
+   unsigned long long int current = 0;
+              /*The ticks now.*/
    int position = 0;
    TTYTaskQueue *reader = 0;
 
@@ -51,27 +61,35 @@ static int ttyTaskFunction(void *data)
 
          switch(queue->type)
          {
-         case 1:
+         case 1: /*Read.*/
             if(reader && (queue->data = -EBUSY))
                break;
             reader = queue;
             position = 0;
+            frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh.*/
+            ticks = lastest = 0;
             break;
-         case 2:
+         case 2: /*Write.*/
             queue->data =
                frameBufferWriteStringInColor(
-                     0xff,0xff,0xff,queue->s,queue->data);
+                     0xff,0xff,0xff,queue->s,queue->data,0);
             if(queue->task) /*Is the task waiting?*/
                wakeUpTask(queue->task);
             else
                kfree(queue->s),kfree(queue);
+            if(!ticks)
+               lastest = ticks = getTicks();
+            else
+               lastest = getTicks();
             break;
-         case 3:
+         case 3: /*Keyboard press.*/
             queue->data = (*queue->callback)(queue->data);
             if(!queue->data)
                break;
             if(!reader || position != 0 || queue->data != '\b')
-               frameBufferWriteString((const char []){queue->data,'\0'});
+               frameBufferWriteStringInColor(
+                  0xff,0xff,0xff,(const char []){queue->data,'\0'},1,
+                  (ticks = lastest = 0) || 1); /*We must refresh!*/
             if(!reader)
                break;
             if(queue->data == '\b' && position == 0)
@@ -92,12 +110,23 @@ static int ttyTaskFunction(void *data)
          default:
             break;
          }
+         current = getTicks();
+         if(lastest && (current - lastest >= TTY_REFRESH_LASTEST_TICKS) &&
+            ((ticks = lastest = 0) || 1))
+            frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh.*/
+         else if(ticks && (current - ticks >= TTY_REFRESH_TICKS) &&
+            ((ticks = lastest = 0) || 1))
+            frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh,too!*/
 
          lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
       }
       ttyTask->state = TaskStopping;
       unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
-      schedule(); /*Wait the queue.*/
+      if(!ticks || !lastest)
+         schedule(); /*Wait the queue.*/
+      else
+         scheduleTimeout((lastest + TTY_REFRESH_LASTEST_TICKS - current) * (MSEC_PER_SEC / TIMER_HZ));
+                /*Wait until a request is coming or timeout.*/
    }
    return 0;
 }

@@ -14,7 +14,7 @@ int printkInColor(u8 red,u8 green,u8 blue,const char *string, ...)
    varArgsStart(list,string);
    ret = (int)(vsprintk(buf,string,list) - buf);
    varArgsEnd(list);
-   frameBufferWriteStringInColor(red,green,blue,buf,0);
+   frameBufferWriteStringInColor(red,green,blue,buf,0,1);
    return ret;
 }
 
