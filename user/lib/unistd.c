@@ -1,4 +1,7 @@
 #include <unistd.h>
+#include <errno.h>
+
+int errno;
 
 #define __NR_execve            0x0000
 #define __NR_open              0x0001
@@ -24,6 +27,11 @@
          : "=a" (__ret) \
          : "a" (__NR_##name) \
       ); \
+      if((long)__ret < 0 && (long)__ret >= -200) \
+      { \
+         errno = -__ret; \
+         __ret = -1; \
+      } \
       return (ret)__ret; \
    }
 
@@ -36,6 +44,11 @@
          : "=a" (__ret) \
          : "a" (__NR_##name),"b" ((unsigned long)__a1) \
       ); \
+      if((long)__ret < 0 && (long)__ret >= -200) \
+      { \
+         errno = -__ret; \
+         __ret = -1; \
+      } \
       return (ret)__ret; \
    }
 
@@ -49,6 +62,11 @@
          : "a" (__NR_##name),"b" ((unsigned long)__a1), \
            "c" ((unsigned long)__a2) \
       ); \
+      if((long)__ret < 0 && (long)__ret >= -200) \
+      { \
+         errno = -__ret; \
+         __ret = -1; \
+      } \
       return (ret)__ret; \
    }
 
@@ -62,7 +80,12 @@
          : "a" (__NR_##name),"b" ((unsigned long)__a1), \
            "c" ((unsigned long)__a2),"d" ((unsigned long)__a3) \
       ); \
-      return (ret)__ret; \
+      if((long)__ret < 0 && (long)__ret >= -200) \
+      { \
+         errno = -__ret; \
+         __ret = -1; \
+      } \
+     return (ret)__ret; \
    }
 
 __syscall0(int,fork);
@@ -79,3 +102,4 @@ __syscall3(unsigned long,read,int,fd,void *,buf,unsigned long,size);
 __syscall3(unsigned long,getdents64,int,fd,void *,buf,unsigned long,size);
 __syscall3(unsigned long,write,int,fd,const void *,buf,unsigned long,size);
 __syscall3(int,waitpid,int,pid,int *,result,int,nowait);
+

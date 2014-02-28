@@ -28,6 +28,20 @@ static void *screenOffBuffer = 0; /*A off-screen buffer.*/
 static u32 startAddress; 
    /*The start address of the off-screen buffer to refresh video ram.*/
 
+static u32 frameBufferGetColor(u8 red,u8 green,u8 blue)
+{
+   u32 color;
+   red >>= 8 - frameBufferTag->redMaskSize;
+   green >>= 8 - frameBufferTag->greenMaskSize;
+   blue >>= 8 - frameBufferTag->blueMaskSize;
+
+   color = red << frameBufferTag->redFieldPosition;
+   color |= green << frameBufferTag->greenFieldPosition;
+   color |= blue << frameBufferTag->blueFieldPosition;
+      /*See also the multiboot specifiction or VBE specifiction.*/
+   return color;
+}
+
 static int frameBufferScreenUp(int numberOfLine)
 {
    if(numberOfLine == 0)
@@ -147,6 +161,66 @@ static int frameBufferFillRectSub(u32 color,u32 bpp,u8 *buffer,
    return 0;
 }
 
+static int __frameBufferFillRect(
+   u32 color,int x,int y,int width,int height)
+{
+   const u32 vramSize = frameBufferTag->width * frameBufferTag->height *
+                         (frameBufferTag->bpp / 8);
+   const u32 __width = frameBufferTag->width;
+   const u32 bpp = frameBufferTag->bpp / 8;
+   u8 *vram;
+   vram = screenOffBuffer + startAddress;
+
+   vram += y * __width * bpp;
+
+   while(vram - (u8 *)screenOffBuffer >= vramSize)
+      vram -= vramSize;
+
+   u32 free = (vramSize - (vram - (u8 *)screenOffBuffer)) / (__width * bpp);
+   vram += x * bpp;
+   if(free < height) /*The free lines are not enough.*/
+   {
+      frameBufferFillRectSub(color,bpp,vram,width,free,__width);
+      height -= free;
+      vram = screenOffBuffer + x * bpp; /*Roll to the start and add the offset.*/
+   }
+   frameBufferFillRectSub(color,bpp,vram,width,height,__width);
+   return 0;
+}
+
+static int frameBufferDrawPoint(u32 color,int x,int y)
+{
+   const u32 width = frameBufferTag->width;
+   const u32 bpp = frameBufferTag->bpp >> 3; /* ">> 3" is "/ 8".*/
+   const u32 vramSize = frameBufferTag->height * bpp * width;
+
+   u8 *buffer = screenOffBuffer + startAddress;
+   buffer += y * width * bpp;
+
+   while(buffer - (u8 *)screenOffBuffer >= vramSize)
+      buffer -= vramSize;
+   buffer += x * bpp;
+
+   switch(bpp)
+   {
+   case 3:
+      buffer[0] = (color >>= 0) & 0xff;
+      buffer[1] = (color >>= 8) & 0xff;
+      buffer[2] = (color >>= 8) & 0xff;
+      break; /*Update the off-screen buffer.*/
+   case 4:
+      *(u32 *)buffer = color;
+      break;
+   }
+   return 0;
+}
+
+int frameBufferFillRect(
+   u8 red,u8 green,u8 blue,int x,int y,int width,int height)
+{
+   return __frameBufferFillRect(frameBufferGetColor(red,green,blue),x,y,width,height);
+}
+
 int initFrameBuffer(MultibootTagFrameBuffer *fb)
 {
    extern void *endAddressOfKernel;
@@ -166,65 +240,23 @@ int initFrameBuffer(MultibootTagFrameBuffer *fb)
    screenOffBuffer = endAddressOfKernel;
    endAddressOfKernel += size;
 
-   memset(screenOffBuffer,0,size);
+   memset(screenOffBuffer,0,size); /*Set to zero.*/
    return 0; /*Successful.*/
-}
-
-int frameBufferFillRect(
-   u8 red,u8 green,u8 blue,int x,int y,int width,int height)
-{
-   u32 color;
-   const u32 vramSize = frameBufferTag->width * frameBufferTag->height *
-                         (frameBufferTag->bpp / 8);
-   const u32 __width = frameBufferTag->width;
-   const u32 bpp = frameBufferTag->bpp / 8;
-   u8 *vram;
-   if(screenOffBuffer)
-      vram = screenOffBuffer + startAddress;
-   else
-      vram = (void *)frameBufferTag->address;
-
-   red >>= 8 - frameBufferTag->redMaskSize;
-   green >>= 8 - frameBufferTag->greenMaskSize;
-   blue >>= 8 - frameBufferTag->blueMaskSize;
-
-   color = red << frameBufferTag->redFieldPosition;
-   color |= green << frameBufferTag->greenFieldPosition;
-   color |= blue << frameBufferTag->blueFieldPosition;
-
-   vram += y * __width * bpp;
-
-   if(!screenOffBuffer && (vram += x * bpp)) /*The off-screen buffer is not set.*/
-      return frameBufferFillRectSub(color,bpp,vram,width,height,__width);
-
-   while(vram - (u8 *)screenOffBuffer >= vramSize)
-      vram -= vramSize;
-
-   u32 free = (vramSize - (vram - (u8 *)screenOffBuffer)) / (__width * bpp);
-   vram += x * bpp;
-   if(free < height) /*The free lines are not enough.*/
-   {
-      frameBufferFillRectSub(color,bpp,vram,width,free,__width);
-      height -= free;
-      vram = screenOffBuffer + x * bpp; /*Roll to the start and add the offset.*/
-   }
-   frameBufferFillRectSub(color,bpp,vram,width,height,__width);
-   return 0;
 }
 
 int frameBufferDrawChar(u8 red,u8 green,u8 blue,int x,int y,unsigned char charDrawing)
 {
+   u32 color = frameBufferGetColor(red,green,blue);
    u8 *font = fontASC16 + 
       ((int)(charDrawing)) * FONT_HEIGHT_EVERY_CHAR * FONT_BYTES_PER_LINE_EVERY_CHAR;
    for(int cy = 0;cy < FONT_HEIGHT_EVERY_CHAR;++cy)
    {
       for(int cx = FONT_WIDTH_EVERY_CHAR - 1;cx >= 0; --cx)
       {
-         u8 numberOfFont = cx / 8;
-         u8 mask = 1 << (8 - cx % 8 - 1);
+         u8 numberOfFont = cx >> 3; /*cx / 8*/
+         u8 mask = 1 << (8 - (cx & 7) - 1); /*cx % 8*/
          if(font[cy * FONT_BYTES_PER_LINE_EVERY_CHAR + numberOfFont] & mask)
-            frameBufferDrawPoint(red,green,blue,x + cx,y + cy); /*It's a always-inline function.*/
-                                                     /*It defined in framebuffer.h .*/
+            frameBufferDrawPoint(color,x + cx,y + cy); /*Draw a point.*/
       }
    }
    return 0;

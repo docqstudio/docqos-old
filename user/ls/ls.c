@@ -1,4 +1,6 @@
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 
 int main(int argc,const char *argv[])
 {
@@ -9,11 +11,20 @@ int main(int argc,const char *argv[])
       dir = ".";
    int fd = open(dir);
    if(fd < 0)
-      return write(stdout,"Can't open the dir!\n",0);
+   {
+      write(stdout,strerror(errno),0);
+      write(stdout,"\n",0);
+      return -1;
+   }
    unsigned char buffer[2048 + 5];
    int size,i = 8,first = 0;
    if((size = getdents64(fd,&buffer[8],sizeof(buffer) - 8)) < 0)
-      return (close(fd),write(stdout,"Can't get the data!\n",0));
+   {
+      write(stdout,strerror(errno),0);
+         /*Write the error string to the screen.*/
+      write(stdout,"\n",0);
+      return -1;
+   }
 retry:
    while(i < size + 5)
    {

@@ -1,4 +1,6 @@
 #include <unistd.h>
+#include <string.h>
+#include <errno.h>
 
 int shell(void);
 
@@ -85,11 +87,11 @@ int shellCommandCd(const char *dir)
    if(!dir)
       return 0;
    int retval = chdir(dir);
-   if(!retval)
+   if(retval != -1)
       return 0;
-   write(stdout,"No such dir or file!\n",0);
-                 /*Maybe no such dir or file.*/
-                 /*But it can also be a file.*/
+   write(stdout,strerror(errno),0);
+           /*The error string.*/
+   write(stdout,"\n",0);
    return retval;
 }
 

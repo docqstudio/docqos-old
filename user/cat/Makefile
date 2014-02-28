@@ -1,7 +1,7 @@
 ROOT=../..
 include $(ROOT)/Makefile.config
 TARGET=$(ROOT)/bin/bin/cat
-OBJS=.obj/cat.o
+OBJS=.obj/cat.o $(LDCRT_USER)
 
 first:cachedir $(TARGET)
 

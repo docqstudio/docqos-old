@@ -1,7 +1,7 @@
 ROOT=../..
 include $(ROOT)/Makefile.config
 
-OBJS=.obj/cinit.o
+OBJS=.obj/cinit.o $(LDCRT_USER)
 TARGET=$(ROOT)/bin/sbin/init
 
 first:cachedir $(TARGET)

@@ -66,7 +66,13 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
    {
       if(phdrs[i].type != 1)
          continue;
-      if((retval = doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz)))
+      if(phdrs[i].memsz == 0)
+         continue;
+      if(phdrs[i].filesz == 0) /*The data is not in file!!!!*/
+         retval = doMMap(0,0,phdrs[i].vaddr,phdrs[i].memsz);
+      else
+         retval = doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz);
+      if(retval)
          return retval;
    }
    if((retval = doMMap(0,0,0xffffe000,0x2000)))

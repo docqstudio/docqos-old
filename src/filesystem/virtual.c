@@ -624,7 +624,8 @@ int doUMount(const char *point)
       if(old != ((1 << 16) + 2))
          goto out; /*If this is used,failed.*/
    }while(atomicCompareExchange(&dentry->ref,old,old - (1 << 16)) != old);
-   mnt = dentry->mnt; /*Get mnt and set to the parent's mnt.*/
+   mnt = dentry->mounted; /*Get mnt and set to 0.*/
+   dentry->mounted = 0;
    destoryFileSystemMount(mnt); /*Destory it.*/
    vfsLookUpClear(dentry);
    vfsLookUpClear(dentry);

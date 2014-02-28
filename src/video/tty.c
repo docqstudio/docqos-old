@@ -41,8 +41,6 @@ static int ttyTaskFunction(void *data)
    u64 rflags;
    unsigned long long int ticks = 0; 
               /*The ticks when we did the lastest refreshing.*/
-   unsigned long long int lastest = 0;
-              /*The ticks when we got the lastest writing request.*/
    unsigned long long int current = 0;
               /*The ticks now.*/
    int position = 0;
@@ -67,7 +65,7 @@ static int ttyTaskFunction(void *data)
             reader = queue;
             position = 0;
             frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh.*/
-            ticks = lastest = 0;
+            ticks = 0;
             break;
          case 2: /*Write.*/
             queue->data =
@@ -78,9 +76,7 @@ static int ttyTaskFunction(void *data)
             else
                kfree(queue->s),kfree(queue);
             if(!ticks)
-               lastest = ticks = getTicks();
-            else
-               lastest = getTicks();
+               ticks = getTicks();
             break;
          case 3: /*Keyboard press.*/
             queue->data = (*queue->callback)(queue->data);
@@ -89,7 +85,7 @@ static int ttyTaskFunction(void *data)
             if(!reader || position != 0 || queue->data != '\b')
                frameBufferWriteStringInColor(
                   0xff,0xff,0xff,(const char []){queue->data,'\0'},1,
-                  (ticks = lastest = 0) || 1); /*We must refresh!*/
+                  (ticks = 0) || 1); /*We must refresh!*/
             if(!reader)
                break;
             if(queue->data == '\b' && position == 0)
@@ -111,21 +107,18 @@ static int ttyTaskFunction(void *data)
             break;
          }
          current = getTicks();
-         if(lastest && (current - lastest >= TTY_REFRESH_LASTEST_TICKS) &&
-            ((ticks = lastest = 0) || 1))
-            frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh.*/
-         else if(ticks && (current - ticks >= TTY_REFRESH_TICKS) &&
-            ((ticks = lastest = 0) || 1))
+         if(ticks && (current - ticks >= TTY_REFRESH_TICKS) &&
+            ((ticks = 0) || 1))
             frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh,too!*/
 
          lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
       }
       ttyTask->state = TaskStopping;
       unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
-      if(!ticks || !lastest)
+      if(!ticks)
          schedule(); /*Wait the queue.*/
       else
-         scheduleTimeout((lastest + TTY_REFRESH_LASTEST_TICKS - current) * (MSEC_PER_SEC / TIMER_HZ));
+         scheduleTimeout((ticks + TTY_REFRESH_TICKS - current) * (MSEC_PER_SEC / TIMER_HZ));
                 /*Wait until a request is coming or timeout.*/
    }
    return 0;

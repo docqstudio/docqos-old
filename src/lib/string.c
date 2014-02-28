@@ -5,8 +5,14 @@ void *memcpy(void *to,const void *from,int n)
 {
    asm volatile (
       "cld\n\t"
-      "cmpq $0,%%rcx\n\t"
-      "je 2f\n\t"
+      "cmpq $0,%%rbx\n\t"
+      "je 3f\n\t"
+      "movq %%rbx,%%rcx\n\t"
+      "rep; movsq\n\t"
+      "3:" /*label next*/
+      "andq $0x1,%%rdx\n\t"
+      "jz 2f\n\t"
+      "movq %%rdx,%%rcx\n\t"
       "rep; movsl\n\t"
       "2:" /*label next*/
       "movq %%rax,%%rcx\n\t"
@@ -15,7 +21,7 @@ void *memcpy(void *to,const void *from,int n)
       "rep; movsb\n\t"
       "1:" /*label end*/
       :
-      : "c" (n / 4), "a" (n), "D" (to), "S" (from)
+      : "d" (n >> 2), "a" (n), "D" (to), "S" (from), "b" (n >> 3)
        /* n/4 -> %rcx , n -> %rax , to -> %rdi , from -> %rsi*/
       :"memory");
    return to;
