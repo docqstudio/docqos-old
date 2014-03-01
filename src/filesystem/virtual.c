@@ -481,7 +481,7 @@ VFSFile *openFile(const char *path)
 int closeFile(VFSFile *file)
 {
    if(atomicAddRet(&file->ref,-1) != 0)
-      return 0;
+      return 0; /*It is used,just return.*/
    if(file->operation->close)
       (*file->operation->close)(file);
    return destoryFile(file);
@@ -843,6 +843,7 @@ TaskFiles *taskForkFiles(TaskFiles *old,ForkFlags flags)
       goto out;
    for(int i = 0;i < sizeof(old->fd)/sizeof(old->fd[0]);++i)
       new->fd[i] = vfsGetFile(old->fd[i]);
+      /*Copy the files.*/
 out:
    return new;
 }
@@ -864,6 +865,7 @@ VFSFile *vfsGetFile(VFSFile *file)
    if(!file)
       return 0;
    atomicAdd(&file->ref,1);
+      /*Add the reference count of the file.*/
    return file;
 }
 
