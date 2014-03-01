@@ -30,8 +30,8 @@ static SpinLock ttyTaskQueueLock;
 static ListHead ttyTaskQueue;
 
 static VFSFileOperation ttyOperation = {
-   .read = &ttyRead,
-   .write = &ttyWrite,
+   .read = (void *)&ttyRead,
+   .write = (void *)&ttyWrite,
    .readDir = 0,
    .lseek = 0
 };

@@ -68,12 +68,12 @@ int handleException(IRQRegisters *regs)
       regs->rflags,regs->rip);
 
    printkInColor(0xff,0x00,0x00,
-      "cs=> 0x%04x,ss=> 0x%04x\n",
+      "cs=> 0x%04lx,ss=> 0x%04lx\n",
       regs->cs,regs->ss);
 
    if(regs->irq)
       printkInColor(0xff,0x00,0x00,
-         "Error Code=> 0x%04x",
+         "Error Code=> 0x%04lx",
          regs->irq);
    for(;;);
    return 0;

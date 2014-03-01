@@ -471,6 +471,7 @@ static int ideRead(void *data,u64 start,u64 size,void *buf)
          goto out;
       memcpy((void *)buf,(const void *)__buf,count * ATAPI_SECTOR_SIZE);
       buf += ATAPI_SECTOR_SIZE * count;
+      ++lba;
 next:
       if(size % ATAPI_SECTOR_SIZE != 0)
       {

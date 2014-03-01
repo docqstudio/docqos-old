@@ -100,6 +100,17 @@ static int destoryDentry(VFSDentry *dentry)
    return addRCUCallback(&vfsDentryCacheRCU,&__destoryDentry,dentry);
 }
 
+static VFSFile *createFile(VFSDentry *dentry)
+{
+   VFSFile *retval = kmalloc(sizeof(*retval));
+   if(unlikely(!retval))
+      return 0;
+   atomicSet(&retval->ref,1);
+   retval->seek = 0;
+   retval->dentry = dentry;
+   return retval;
+}
+
 static FileSystemMount *createFileSystemMount(void)
 {
    FileSystemMount *mnt = 
@@ -372,6 +383,13 @@ failed: /*Failed.*/
    return 0;
 }
 
+static int destoryFile(VFSFile *file)
+{
+   vfsLookUpClear(file->dentry);
+   kfree(file);
+   return 0;
+}
+
 static int vfsFillDir64(void *__data,u8 isDir,u64 length,const char *name)
 {
    u8 *buf = ((u8 **)__data)[0];
@@ -444,13 +462,12 @@ VFSFile *openFile(const char *path)
    VFSDentry *dentry = vfsLookUp(path);
    if(!dentry)
       return (VFSFile *)makeErrorPointer(-ENOENT);
-   VFSFile *file = kmalloc(sizeof(VFSFile));
+   VFSFile *file = createFile(dentry);
    if(unlikely(!file))
    {
       vfsLookUpClear(dentry);
       return (VFSFile *)makeErrorPointer(-ENOMEM);
    }
-   file->dentry = dentry;
    int ret = (*dentry->inode->operation->open)(dentry,file);
    if(ret)
    {
@@ -461,13 +478,22 @@ VFSFile *openFile(const char *path)
    return file;
 }
 
+int closeFile(VFSFile *file)
+{
+   if(atomicAddRet(&file->ref,-1) != 0)
+      return 0;
+   if(file->operation->close)
+      (*file->operation->close)(file);
+   return destoryFile(file);
+}
+
 int readFile(VFSFile *file,void *buf,u64 size)
 {
    if(file->dentry->type == VFSDentryDir)
       return -EISDIR;
    if(!file->operation->read)
       return -EBADFD;
-   int ret = (*file->operation->read)(file,buf,size);
+   int ret = (*file->operation->read)(file,buf,size,&file->seek);
    return ret; /*Call file->operation->read.*/
 }
 
@@ -477,7 +503,7 @@ int writeFile(VFSFile *file,const void *buf,u64 size)
       return -EISDIR;
    if(!file->operation->write)
       return -EBADFD;
-   int ret = (*file->operation->write)(file,buf,size);
+   int ret = (*file->operation->write)(file,buf,size,&file->seek);
    return ret;
 }
 
@@ -488,16 +514,6 @@ int lseekFile(VFSFile *file,u64 offset)
    if(!file->operation->lseek)
       return -EBADFD;
    return (*file->operation->lseek)(file,offset);
-}
-
-int closeFile(VFSFile *file)
-{
-   VFSDentry *dentry = file->dentry;
-   if(file->operation->close)
-      (*file->operation->close)(file);
-   vfsLookUpClear(dentry); /*Clear it.*/
-   kfree(file);
-   return 0;
 }
 
 int doOpen(const char *path)
@@ -826,19 +842,7 @@ TaskFiles *taskForkFiles(TaskFiles *old,ForkFlags flags)
    if(!old)
       goto out;
    for(int i = 0;i < sizeof(old->fd)/sizeof(old->fd[0]);++i)
-   {
-      if(old->fd[i])
-      { /*Copy file descriptors.*/
-         VFSFile *file = kmalloc(sizeof(*file));
-         if(unlikely(!file))
-            continue;
-         file->seek = old->fd[i]->seek;
-         file->operation = old->fd[i]->operation;
-         file->dentry = vfsLookUpDentry(old->fd[i]->dentry);
-                               /*Add old->fd[i]->dentry's reference count.*/
-         new->fd[i] = file;
-      }
-   }
+      new->fd[i] = vfsGetFile(old->fd[i]);
 out:
    return new;
 }
@@ -855,15 +859,12 @@ int taskExitFiles(TaskFiles *old,u8 share)
    return 0;
 }
 
-VFSFile *cloneFile(VFSFile *file)
+VFSFile *vfsGetFile(VFSFile *file)
 {
-   VFSFile *new = kmalloc(sizeof(*new));
-   if(unlikely(!new))
+   if(!file)
       return 0;
-   new->dentry = vfsLookUpDentry(file->dentry);
-   new->operation = file->operation;
-   new->seek = file->seek;
-   return new;
+   atomicAdd(&file->ref,1);
+   return file;
 }
 
 subsysInitcall(initVFS);

@@ -69,7 +69,7 @@ int kfree(const void *obj)
 #ifdef CONFIG_DEBUG
    if(!cache)
    {
-      printkInColor(0xff,0x00,0x00,"(%s) Can't get the cache of the obj %x.",__func__,obj);
+      printkInColor(0xff,0x00,0x00,"(%s) Can't get the cache of the obj %p.",__func__,obj);
       return -EINVAL;
    }
 #endif

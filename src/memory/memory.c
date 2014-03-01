@@ -57,7 +57,7 @@ static int displayMemoryInformation(void)
       base = memoryMap->entries[i].address;
       limit = memoryMap->entries[i].length;
       type = memoryMap->entries[i].type;
-      printk("0x%016lx 0x%016lx 0x%08lx\n",base,limit,type);
+      printk("0x%016lx 0x%016lx 0x%08x\n",base,limit,type);
    }
    printkInColor(0x00,0xFF,0xFF,"Memory size: 0x%016lx bytes",memorySize);
    printkInColor(0x00,0xFF,0xFF,"(About %ld MB).\n",memorySize / 1024 / 1024 + 1);

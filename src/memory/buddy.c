@@ -45,7 +45,7 @@ int initBuddySystem(void)
    physicsPageCount = getMemorySize();
    physicsPageCount += 0xfff;
    physicsPageCount >>= 3*4;
-   printk("Physics Page Count:0x%x\n",physicsPageCount);
+   printk("Physics Page Count:0x%lx\n",physicsPageCount);
 
    for(int order  = 0;order < MAX_ORDER;++order)
    {
@@ -62,7 +62,7 @@ int initBuddySystem(void)
    }
 
    endAddressOfKernel += physicsPageCount*sizeof(PhysicsPage) + 1;
-   printk("The last physics page address: 0x%p,the size of physics pages: %dKB.\n",
+   printk("The last physics page address: 0x%p,the size of physics pages: %ldKB.\n",
       endAddressOfKernel,
       physicsPageCount * sizeof(PhysicsPage)/1024 + 1);
 

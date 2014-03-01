@@ -371,7 +371,7 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
       return -ENOMEM;
    new->start = start;
    new->length = len;
-   new->file = file;
+   new->file = vfsGetFile(file);
    new->offset = offset;
    if(vma)
    {
@@ -424,12 +424,8 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
    }
    if(old)
    {
-      new->exec = cloneFile(old->exec);
-      if(old->exec && !new->exec)
-      {
-         taskExitMemory(new);
-         return 0;
-      }
+      if(old->exec)
+         new->exec = vfsGetFile(old->exec);
       VirtualMemoryArea *vma,*nvma,**pvma;
       vma = old->vm;
       pvma = &new->vm;
@@ -444,10 +440,8 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
          nvma->offset = vma->offset;
          if(!vma->file)
             nvma->file = 0;
-         else if(vma->file == old->exec)
-            nvma->file = new->exec;
          else
-            nvma->file = cloneFile(vma->file);
+            nvma->file = vfsGetFile(vma->file);
          nvma->start = vma->start;
          nvma->length = vma->length;
          nvma->next = 0;
@@ -480,12 +474,12 @@ int taskExitMemory(TaskMemory *old)
       {
          __vma = vma->next;
          if(vma->file && vma->file != old->exec)
-            closeFile(vma->file);
+            vfsPutFile(vma->file);
          kfree(vma);
          vma = __vma;
       }
       if(old->exec)
-         closeFile(old->exec);
+         vfsPutFile(old->exec);
       kfree(old);
       break;
    default:
@@ -496,7 +490,7 @@ int taskExitMemory(TaskMemory *old)
 
 int doPageFault(IRQRegisters *reg)
 {
-   u64 address,pos = 0;
+   u64 address,pos,base;
    VirtualMemoryArea *vma;
    Task *current = getCurrentTask();
    int retval;
@@ -523,9 +517,7 @@ int doPageFault(IRQRegisters *reg)
    {
       pos = address & ~0xfff;
       pos -= vma->start;
-      pos += vma->offset;
-      if(lseekFile(file,pos > 0 ? pos : -pos) < 0)
-         return -EIO;
+      base = vma->offset + (pos > 0 ? pos : -pos);
    }
 
    void *pml4e = current->mm->page;
@@ -549,8 +541,9 @@ int doPageFault(IRQRegisters *reg)
    page = getPhysicsPageAddress((PhysicsPage *)page);
    retval = -EIO;
    if(file)
-      if(readFile(file,page + ((pos < 0) ? -pos : 0),0x1000 - ((pos < 0) ? -pos : 0)) < 0)
-         goto failed; /*Read data from the file!*/
+      if((*file->operation->read)(file,
+         page + (pos < 0 ? -pos : 0),0x1000 - ((pos < 0) ? -pos : 0),&base) < 0)
+      goto failed;
    retval = -EBUSY;
    if(setPTE(pte,address,va2pa(page)) < 0)
       goto failed;

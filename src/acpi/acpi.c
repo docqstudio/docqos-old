@@ -132,7 +132,7 @@ static int parseHpet(ACPIHeaderHpet *hpet)
    u16 t = hpet->minTickInPeriodicMode;
    pointer address = (pointer)hpet->baseAddress.address;
    hpetAddress = (u8 *)pa2va(address);
-   printk("\nFound HPET:Address => 0x%016x,Min Tick In Periodic Mode => %d.\n",
+   printk("\nFound HPET:Address => 0x%016lx,Min Tick In Periodic Mode => %d.\n",
       address,t);
 
    return 0;

@@ -6,7 +6,7 @@
 static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount);
 static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
 static int iso9660Open(VFSDentry *dentry,VFSFile *file);
-static int iso9660Read(VFSFile *file,void *buf,u64 size);
+static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek);
 static int iso9660LSeek(VFSFile *file,u64 offset);
 static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data);
 
@@ -174,28 +174,27 @@ static int iso9660Open(VFSDentry *dentry,VFSFile *file)
    return 0;
 }
 
-static int iso9660Read(VFSFile *file,void *buf,u64 size)
+static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek)
 {
    VFSINode *inode = file->dentry->inode;
-   u64 seek = file->seek;
    BlockIO io;
-   if(seek + size < seek) /*If too long,return.*/
+   if(*seek + size < *seek) /*If too long,return.*/
       return -EINVAL;
-   if(seek >= inode->size) /*If seek is not true,return.*/
+   if(*seek >= inode->size) /*If seek is not true,return.*/
       return -EBADFD;
-   if(seek + size >= inode->size)
-      size = inode->size - seek - 1; 
+   if(*seek + size >= inode->size)
+      size = inode->size - *seek - 1; 
       /*Just set it too max bytes we can read.*/
    if(size == 0)
       return 0;
    io.part = inode->part;
-   io.start = inode->start + seek;
+   io.start = inode->start + *seek;
    io.size = size;
    io.read = 1;
    io.buffer = buf;
    if(submitBlockIO(&io)) /*Try to read.*/
       return -EIO;
-   file->seek += size; /*Add for reading next time.*/
+   *seek += size; /*Add for reading next time.*/
    return size; /*Return how many bytes we have read.*/
 }
 
