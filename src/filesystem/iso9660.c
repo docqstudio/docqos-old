@@ -7,7 +7,7 @@ static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount);
 static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
 static int iso9660Open(VFSDentry *dentry,VFSFile *file);
 static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek);
-static int iso9660LSeek(VFSFile *file,u64 offset);
+static int iso9660LSeek(VFSFile *file,s64 offset,int type);
 static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data);
 
 static FileSystem iso9660FileSystem = {
@@ -169,6 +169,7 @@ next:
 static int iso9660Open(VFSDentry *dentry,VFSFile *file)
 {
    file->dentry = dentry;
+   
    file->seek = 0;
    file->operation = &iso9660FileOperation;
    return 0;
@@ -198,13 +199,24 @@ static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek)
    return size; /*Return how many bytes we have read.*/
 }
 
-static int iso9660LSeek(VFSFile *file,u64 offset)
+static int iso9660LSeek(VFSFile *file,s64 offset,int type)
 {
    VFSINode *inode = file->dentry->inode;
-   if(offset >= inode->size)
+   switch(type)
+   {
+   case SEEK_SET:
+      file->seek = offset;
+      break;
+   case SEEK_CUR:
+      file->seek += offset;
+      break;
+   case SEEK_END:
+      file->seek = inode->size - 1 + offset;
+      break;
+   default:
       return -EINVAL;
-   file->seek = offset;
-   return offset;
+   }
+   return file->seek;
 }
 
 static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)

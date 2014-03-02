@@ -10,12 +10,15 @@ _start:
    movq %rbx,%rsi
    call main
 
-   pushq %rax
-   movq $0,%rax
+   pushq %rax /*Save the retval of the main function.*/
+   
+   movq $0,%rdi
    call close /*Close stdin.*/
-   movq $1,%rax
-   call close  /*Close stdout.*/
-   popq %rax
+   movq $1,%rdi
+   call close /*Close stdout.*/
+   movq $2,%rdi
+   call close /*Close stderr.*/
 
-   movq %rax,%rdi
-   jmp exit
+   popq %rdi /*Restore the retval to %rdi.*/
+
+   jmp exit /*Call exit(%rdi) .*/

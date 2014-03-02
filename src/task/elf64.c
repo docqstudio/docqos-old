@@ -41,7 +41,7 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
 {
    ELF64Header header;
    int retval;
-   if(lseekFile(file,0) < 0)
+   if(lseekFile(file,0,SEEK_SET) < 0)
       return -ENOEXEC;
    if((retval = readFile(file,&header,sizeof(header))) <= 0) /*Read header.*/
       return retval == -EIO ? -EIO : -ENOEXEC;
@@ -56,7 +56,7 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
    if(header.phentsize != sizeof(ELF64ProgramHeader))
       return -ENOEXEC; /*Is the program headers' size right?*/
 
-   if(lseekFile(file,header.phoff) < 0) /*Seek file to the program headers' position.*/
+   if(lseekFile(file,header.phoff,SEEK_SET) < 0) /*Seek file to the program headers' position.*/
       return -ENOEXEC;
    ELF64ProgramHeader phdrs[header.phnum];
    if((retval = readFile(file,phdrs,sizeof(phdrs))) <= 0) /*Read them!*/

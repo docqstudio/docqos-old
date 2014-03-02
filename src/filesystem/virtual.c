@@ -507,13 +507,49 @@ int writeFile(VFSFile *file,const void *buf,u64 size)
    return ret;
 }
 
-int lseekFile(VFSFile *file,u64 offset)
+int lseekFile(VFSFile *file,s64 offset,int type)
 {
    if(file->dentry->type == VFSDentryDir)
       return -EISDIR;
    if(!file->operation->lseek)
       return -EBADFD;
-   return (*file->operation->lseek)(file,offset);
+   return (*file->operation->lseek)(file,offset,type);
+}
+
+int doDup2(int fd,int new)
+{
+   TaskFiles *files = getCurrentTask()->files;
+   VFSFile *old,**pnew;
+   if((unsigned int)fd >= TASK_MAX_FILES ||
+      (unsigned int)new >= TASK_MAX_FILES)
+      return -EBADF;
+   if(fd == new)
+      return new; /*Just do nothing.*/
+   old = files->fd[fd];
+   pnew = &files->fd[new]; 
+   if(!old)
+      return -EBADF;
+   if(*pnew)
+      closeFile(*pnew); /*First close the file if it is unsed.*/
+   *pnew = vfsGetFile(old); /*Dup it!*/
+   return new;
+}
+
+int doDup(int fd)
+{
+   TaskFiles *files = getCurrentTask()->files;
+   VFSFile *file;
+   int new;
+   if((unsigned int)fd >= TASK_MAX_FILES)
+      return -EBADF;
+   file = files->fd[fd];
+   if(!file)
+      return -EBADF; /*No file.*/
+   for(new = 0;
+      fd < sizeof(files->fd) / sizeof(files->fd[0]);++fd)
+      if(files->fd[new] == 0) /*Look for a unused fd.*/
+         return doDup2(fd,new);
+   return -EMFILE;
 }
 
 int doOpen(const char *path)
@@ -555,7 +591,7 @@ int doWrite(int fd,const void *buf,u64 size)
    return writeFile(file,buf,size); /*Call file->operation->write.*/
 }
 
-int doLSeek(int fd,u64 offset)
+int doLSeek(int fd,s64 offset,int type)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
       return -EBADF;
@@ -563,7 +599,7 @@ int doLSeek(int fd,u64 offset)
    VFSFile *file = current->files->fd[fd];
    if(!file)
       return -EBADF;
-   return lseekFile(file,offset);
+   return lseekFile(file,offset,type);
 }
 
 int doClose(int fd)

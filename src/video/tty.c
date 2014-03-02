@@ -92,9 +92,8 @@ static int ttyTaskFunction(void *data)
                break;
             else if(queue->data == '\b' && ((--position),1))
                break;
-            if(queue->data  != '\n')
-               reader->s[position++] = queue->data;
-            if(reader->data == position || queue->data == '\n')
+            reader->s[position++] = queue->data;
+            if(reader->data == (position - 1) || queue->data == '\n')
             {
                reader->s[position] = '\0';
                reader->data = position;

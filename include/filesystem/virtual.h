@@ -37,7 +37,7 @@ typedef struct VFSFileOperation
    int (*readDir)(VFSFile *file,VFSDirFiller filler,void *data);
    int (*read)(VFSFile *file,void *buf,u64 size,u64 *seek);
    int (*write)(VFSFile *file,const void *buf,u64 size,u64 *seek);
-   int (*lseek)(VFSFile *file,u64 offset);
+   int (*lseek)(VFSFile *file,s64 offset,int type);
    int (*close)(VFSFile *file);
 } VFSFileOperation;
 
@@ -101,6 +101,10 @@ typedef struct FileSystem{
    SpinLock lock;
 } FileSystem;
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 int registerFileSystem(FileSystem *system);
 FileSystem *lookForFileSystem(const char *name);
 BlockDevicePart *openBlockDeviceFile(const char *path);
@@ -111,11 +115,13 @@ int doMount(const char *point,FileSystem *fs,
 int doOpen(const char *path);
 int doClose(int fd);
 int doRead(int fd,void *buf,u64 size);
-int doLSeek(int fd,u64 offset);
+int doLSeek(int fd,s64 offset,int type);
 int doGetDents64(int fd,void *data,u64 size);
 int doWrite(int fd,const void *buf,u64 size);
 int doChdir(const char *dir);
 int doGetCwd(char *buffer,u64 size);
+int doDup(int fd);
+int doDup2(int fd,int new);
 
 VFSFile *vfsGetFile(VFSFile *file);
 #define vfsPutFile closeFile
@@ -124,6 +130,6 @@ VFSFile *openFile(const char *path);
 int readFile(VFSFile *file,void *buf,u64 size);
 int writeFile(VFSFile *file,const void *buf,u64 size);
 int closeFile(VFSFile *file);
-int lseekFile(VFSFile *file,u64 offset);
+int lseekFile(VFSFile *file,s64 offset,int type);
 
 int mountRoot(BlockDevicePart *part);

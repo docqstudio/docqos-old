@@ -8,23 +8,18 @@ int main(int argc,char *argv[])
 {
    if(argc == 0) /*Run from kernel.*/
    { /*Try to open stdin and stdout.*/
-      int fd1 = open("/dev/tty");
-      int fd2 = open("/dev/tty");
-      if(fd2 < 0)
-      { /*Fail to open stdout.*/
-         if(fd1 > 0)
-            close(fd1);
+      int fd1 = open("/dev/tty"),fd2,fd3;
+      if(fd1 < 0)
          return -1;
-      }
-      if(fd1 != stdin || fd2 != stdout)
-      {
-         write(fd2,"/sbin/init process failed:\n   "
-                  "Can't open /dev/tty as stdout or stdin.\n",0);
-         if(fd1 > 0)
-            close(fd1);
-         close(fd2);
-         return -1;
-      }/*Now we have opened stdin and stdout.*/
+      if(fd1 != 0)
+         return write(fd1,"INIT Process: \n"
+         "      Can't open /dev/tty as stdin.\n",0);
+      fd2 = dup2(fd1,1);
+      fd3 = dup2(fd1,2);
+      if(fd2 != 1 || fd3 != 2)
+         return write(fd1,"INIT Process: \n"
+         "      Can't dup stdin as stdout and stderr.\n",0);
+      /*Now we have opened stdin and stdout,stderr.*/
    }else { /*Run from user.*/
       if(argc != 2)
          goto usage;
@@ -70,9 +65,9 @@ const char *getCommandArgument(char **cmd)
 {
    char *retval = *cmd;
    char *tmp = *cmd;
-   while(*tmp != ' ' && *tmp != '\0')
+   while(*tmp != ' ' && *tmp != '\n')
       ++tmp;    /*Skip arguments.*/
-   if(*tmp == '\0')
+   if(*tmp == '\n' && ((*tmp = '\0') || 1))
       goto out;
    *tmp++ = '\0'; /*Set end.*/
    while(*tmp == ' ') /*Skip ' '.*/
