@@ -95,7 +95,6 @@ __syscall0(int,fork);
 __syscall0(int,getpid);
 
 __syscall1(int,exit,int,code);
-__syscall1(int,open,const char *,filename);
 __syscall1(int,close,int,fd);
 __syscall1(int,reboot,unsigned long,command);
 __syscall1(int,chdir,const char *,dir);
@@ -104,6 +103,7 @@ __syscall1(int,dup,int,fd);
 __syscall2(int,gettimeofday,unsigned long *,time,void *,unused);
 __syscall2(int,dup2,int,fd,int,new);
 __syscall2(int,getcwd,char *,buf,unsigned long,size);
+__syscall2(int,open,const char *,path,int,mode);
 
 __syscall3(int,execve,const char *,path,const char **,argc,const char **,envp);
 __syscall3(unsigned long,read,int,fd,void *,buf,unsigned long,size);

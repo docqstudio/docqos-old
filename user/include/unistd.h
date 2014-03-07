@@ -22,9 +22,16 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 
+#define O_ACCMODE   0x0003
+#define O_RDONLY    0x0001
+#define O_WRONLY    0x0002
+#define O_RDWR      0x0003
+#define O_CLOEXEC   0x0010
+#define O_DIRECTORY 0x0020
+
 int fork(void);
 int exit(int n);
-int open(const char *path);
+int open(const char *path,int mode);
 int close(int fd);
 unsigned long read(int fd,void *buf,unsigned long size);
 unsigned long write(int fd,const void *buf,unsigned long size);

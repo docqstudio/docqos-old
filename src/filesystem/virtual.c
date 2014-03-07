@@ -457,24 +457,31 @@ failed:
    return 0;
 }
 
-VFSFile *openFile(const char *path)
+VFSFile *openFile(const char *path,int mode)
 {
+   if((mode & O_ACCMODE) == 0) /*INVAL Access Mode.*/
+      return (VFSFile *)makeErrorPointer(-EINVAL);
+
    VFSDentry *dentry = vfsLookUp(path);
    if(!dentry)
       return (VFSFile *)makeErrorPointer(-ENOENT);
+   if((mode & O_DIRECTORY) && (dentry->type != VFSDentryDir))
+      return (VFSFile *)makeErrorPointer(-ENOTDIR);
+
    VFSFile *file = createFile(dentry);
    if(unlikely(!file))
    {
       vfsLookUpClear(dentry);
       return (VFSFile *)makeErrorPointer(-ENOMEM);
    }
-   int ret = (*dentry->inode->operation->open)(dentry,file);
+   int ret = (*dentry->inode->operation->open)(dentry,file,mode);
    if(ret)
    {
       kfree(file);
       vfsLookUpClear(dentry);
       return (VFSFile *)makeErrorPointer(ret);
    }
+   file->mode = mode; /*Set the mode.*/
    return file;
 }
 
@@ -552,7 +559,7 @@ int doDup(int fd)
    return -EMFILE;
 }
 
-int doOpen(const char *path)
+int doOpen(const char *path,int mode)
 {
    Task *current = getCurrentTask();
    int fd;
@@ -562,7 +569,7 @@ int doOpen(const char *path)
          goto found; /*Found a null position in current->fd.*/
    return -EMFILE;
 found:;
-   VFSFile *file = openFile(path);
+   VFSFile *file = openFile(path,mode);
    if(isErrorPointer(file))
       return getPointerError(file);
    current->files->fd[fd] = file;
@@ -904,5 +911,7 @@ VFSFile *vfsGetFile(VFSFile *file)
       /*Add the reference count of the file.*/
    return file;
 }
+
+VFSFile *vfsPutFile(VFSFile *file) __attribute__ ((alias("vfsGetFile")));
 
 subsysInitcall(initVFS);

@@ -50,7 +50,7 @@ SystemCallHandler systemCallHandlers[] = {
 
 static u64 systemOpen(IRQRegisters *reg)
 {
-   return doOpen((const char *)reg->rbx);
+   return doOpen((const char *)reg->rbx,(int)reg->rcx);
 }
 
 static u64 systemRead(IRQRegisters *reg)

@@ -45,14 +45,14 @@ int kinit(void)
    doInitcalls();
    char buf[25] = {};
    printk("\nTry to open file 'test1.c'.\n");
-   int fd = doOpen("test1.c");
+   int fd = doOpen("test1.c",O_RDONLY);
    if(fd < 0)
       printkInColor(0xff,0x00,0x00,"Failed!!This file doesn't exist.\n");
    else
       doClose(fd); /*Never happen.*/
 
    printk("Try to open file '/dev/dev.inf'.\n");
-   fd = doOpen("/dev/dev.inf");
+   fd = doOpen("/dev/dev.inf",O_RDONLY);
    if(fd >= 0)
    {
       printkInColor(0x00,0xff,0x00,"Successful!Read data from it:\n");

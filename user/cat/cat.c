@@ -9,7 +9,7 @@ int main(int argc,const char *argv[])
    char null = 0;
    int fd = stdin; /*If no arguments,just cat stdin.*/
    if(argc > 1)
-      fd = open(argv[argc - 1]);
+      fd = open(argv[argc - 1],O_RDONLY);
    if(fd < 0)
    {
       write(stdout,strerror(errno),0);

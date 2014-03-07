@@ -9,7 +9,7 @@ int main(int argc,const char *argv[])
       dir = argv[1];
    else
       dir = ".";
-   int fd = open(dir);
+   int fd = open(dir,O_RDONLY | O_DIRECTORY);
    if(fd < 0)
    {
       write(stdout,strerror(errno),0);

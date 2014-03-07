@@ -16,7 +16,7 @@ typedef struct DevfsINode{
 static int devfsMount(BlockDevicePart *part __attribute__ ((unused))
    ,FileSystemMount *mnt);
 static int devfsLookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
-static int devfsOpen(VFSDentry *dentry,VFSFile *file);
+static int devfsOpen(VFSDentry *dentry,VFSFile *file,int mode);
 static int devfsReadDir(VFSFile *file,VFSDirFiller filler,void *data);
 static int devfsClose(VFSFile *file);
 
@@ -136,7 +136,7 @@ out:
    return 0;
 }
 
-static int devfsOpen(VFSDentry *dentry,VFSFile *file)
+static int devfsOpen(VFSDentry *dentry,VFSFile *file,int mode)
 {
    DevfsINode *inode = (DevfsINode *)dentry->inode->data;
    if(!inode->operation)

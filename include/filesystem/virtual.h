@@ -46,12 +46,13 @@ typedef struct VFSINodeOperation
    int (*mkdir)(VFSDentry *dentry,const char *name);
    int (*unlink)(VFSDentry *result);
    int (*lookUp)(VFSDentry *dentry,VFSDentry *result,const char *name);
-   int (*open)(VFSDentry *dentry,VFSFile *file);
+   int (*open)(VFSDentry *dentry,VFSFile *file,int mode);
 } VFSINodeOperation;
 
 typedef struct VFSFile{
    AtomicType ref;
 
+   int mode;
    VFSDentry *dentry;
    u64 seek;
    void *data;
@@ -101,6 +102,13 @@ typedef struct FileSystem{
    SpinLock lock;
 } FileSystem;
 
+#define O_ACCMODE   0x0003 /*Access Mode.*/
+#define O_RDONLY    0x0001 /*Read Only.*/
+#define O_WRONLY    0x0002 /*Write Only.*/
+#define O_RDWR      0x0003 /*Read And Write.*/
+#define O_CLOEXEC   0x0010 /*Close On Exec.*/
+#define O_DIRECTORY 0x0020 /*Must Be A Directory.*/
+
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
@@ -112,7 +120,7 @@ BlockDevicePart *openBlockDeviceFile(const char *path);
 int doChroot(const char *dir);
 int doMount(const char *point,FileSystem *fs,
           BlockDevicePart *part,u8 init);
-int doOpen(const char *path);
+int doOpen(const char *path,int mode);
 int doClose(int fd);
 int doRead(int fd,void *buf,u64 size);
 int doLSeek(int fd,s64 offset,int type);
@@ -124,9 +132,9 @@ int doDup(int fd);
 int doDup2(int fd,int new);
 
 VFSFile *vfsGetFile(VFSFile *file);
-#define vfsPutFile closeFile
+VFSFile *vfsPutFile(VFSFile *file);
 
-VFSFile *openFile(const char *path);
+VFSFile *openFile(const char *path,int mode);
 int readFile(VFSFile *file,void *buf,u64 size);
 int writeFile(VFSFile *file,const void *buf,u64 size);
 int closeFile(VFSFile *file);

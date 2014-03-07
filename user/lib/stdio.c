@@ -18,7 +18,7 @@ FILE * const __stderr = &files[3]; /*The third file.*/
 FILE *fopen(const char *path,const char *mode)
 {
    int i;
-   int fd = open(path);
+   int fd = open(path,O_RDONLY);
    if(fd < 0)
       return 0;
    for(i = 0;i < sizeof(files) / sizeof(files[0]);++i)
@@ -164,49 +164,52 @@ int vfscanf(FILE *file,const char *format,va_list list)
 
 int vsprintf(char *string,const char *format,va_list list)
 {
-   char *__string = string;
-   char c;
-   char __tmp[128];
-   char *tmp = __tmp;
+    char *__string = string;
+    char c;
+    char __tmp[128];
+    char *tmp = __tmp;
 
-   while((c = *format++))
-   {
-      if(c != '%')
-      {
-         *string++ = c;
-         continue;
-      }
-      c = *format++;
-      switch(c)
-      {
-      case 'd':
-        {
-           int i = va_arg(list,int);
-           char s = (i < 0);
-           i = (i < 0) ? -i : i; /*i = abs(i);*/
-           tmp = __tmp + 127;
-           *tmp-- = '\0'; /*First set end.*/
-           do{
-              *tmp-- = '0' + i % 10;
-              i /= 10; /*Write the char.*/
-           }while(i > 0);
-           if(s)
-              *tmp = '-';
-           else
-              ++tmp;
-           while(*tmp)
-              *string++ = *tmp++;
-        }
-        break;
+    while((c = *format++))
+    {
+       if(c != '%')
+       {
+          *string++ = c;
+          continue;
+       }
+       c = *format++;
+       switch(c)
+       {
+       case 'd':
+         {
+            int i = va_arg(list,int);
+            char s = (i < 0);
+            i = (i < 0) ? -i : i; /*i = abs(i);*/
+            tmp = __tmp + 127;
+            *tmp-- = '\0'; /*First set end.*/
+            do{
+               *tmp-- = '0' + i % 10;
+               i /= 10; /*Write the char.*/
+            }while(i > 0);
+            if(s)
+               *tmp = '-';
+            else
+               ++tmp;
+            while(*tmp)
+               *string++ = *tmp++;
+         }
+         break;
       case 's':
          {
-           const char *s = va_arg(list,const char *);
-           while(*s) /*Just copy to string.*/
-              *string++ = *s++;
-        }
-        break;
-     default:
-        break;
+            const char *s = va_arg(list,const char *);
+            while(*s) /*Just copy to string.*/
+               *string++ = *s++;
+         }
+         break;
+      case 'c':
+         *string++ = va_arg(list,int);
+         break;
+      default:
+         break;
       }
    }
    *string = '\0';
@@ -218,31 +221,54 @@ int vsscanf(const char *string,const char *format,va_list list)
    char c;
    int retval = 0;
 
+#define skip(sskip) \
+   do{ \
+      while(*sskip == '\n' || *sskip == ' ') \
+         ++sskip; \
+   }while(0)
+#define skipall() \
+   do{ \
+      skip(format);skip(string); \
+   }while(0)
+
    for(;;)
    {
-      while(*format == ' ' || *format == '\n')
-         ++format; /*Skip the ' ' or the '\n' of the format.*/
-      while(*string == ' ' || *string == '\n')
-         ++string; /*Skip the ' ' or the '\n' of the string.*/
-      if(*format == '\0')
+      if(*format == '\0' || *string == '\0')
          break; /*No more,just return.*/
       c = *format++;
-      if(c != '%')
+      switch(c)
       {
-         if(*string++ != c)
-            return retval; /*Failed!*/
-         else
-            continue;
+      case '%':
+         break;
+      case ' ':
+      case '\n':
+         skipall(); 
+            /*If *format is a space,skip all spaces of string and format.*/
+         continue;
+      default:
+         if(*string != c)
+            skip(string); /*If it is not the same,skip spaces first.*/
+         if(*string++ != c) 
+            return -1; /*Failed!*/
+         continue;
       }
       c = *format++;
       switch(c)
       {
       case 'd':
+         skip(string);
          {
             int *p = va_arg(list,int *);
             const char *start = string;
-            const char *end = start;
+            const char *end;
             int j = 1;
+            char s = 0;
+            if(*start == '+')
+               ++start; /*Do nothing.*/
+            else if(*start == '-' && (s = 1))
+               ++start;
+            skip(start); /*Skip spaces.*/
+            end = start;
             while('0' <= *end && '9' >= *end)
                ++end; /*How many numbers are there?*/
             if(start == end)
@@ -252,19 +278,32 @@ int vsscanf(const char *string,const char *format,va_list list)
             --end;
             while(end >= start)
                *p += (*end-- - '0') * ((j *= 10) / 10);
+            if(s)
+               *p = -*p;
             ++retval;
          }
          break;
       case 's':
+         skip(string);
          {
             char *s = va_arg(list,char *);
             while(*string != '\n' && *string != '\0' && *string != ' ')
                *s++ = *string++; /*Copy until '\n',end or ' '.*/
+            ++retval;
          }
          break;
+      case 'c':
+         { /*We don't skip the spaces here!!!*/
+            char *s = va_arg(list,char *);
+            *s = *string++;
+            ++retval;
+         }
       default:
          break;
       }
    }
+
+#undef skip
+#undef skipall
    return retval; /*Success!!*/
 }

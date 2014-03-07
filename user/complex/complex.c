@@ -2,18 +2,19 @@
 
 int main(int argc,const char *argv[])
 {
+   char tmp;
    int r,i;
    char buffer[128];
    printf("Please input a complex number:");
    fgets(buffer,sizeof(buffer),stdin); /*Gets the string.*/
 
-   if(sscanf(buffer,"%d+%di",&r,&i) == 2)
+   if(sscanf(buffer,"%d%di %c",&r,&i,&tmp) == 2)
       goto next;
-   if(sscanf(buffer,"%di+%d",&i,&r) == 2)
+   if(sscanf(buffer,"%di%d %c",&i,&r,&tmp) == 2)
       goto next;
-   if(sscanf(buffer,"%d+i%d",&r,&i) == 2)
+   if(sscanf(buffer,"%di%d %c",&r,&i,&tmp) == 2)
       goto next;
-   if(sscanf(buffer,"i%d+%d",&i,&r) == 2)
+   if(sscanf(buffer,"i%d%d %c",&i,&r,&tmp) == 2)
       goto next; /*Try all formats we supported.*/
    for(i = 0;buffer[i] != '\n';++i)
       ;

@@ -161,6 +161,9 @@ int ttyWrite(VFSFile *file,const void *string,u64 size)
    u8 len = size ? size : strlen(string);
    if(len == 0)
       return 0;
+   if((file->mode & O_ACCMODE) != O_RDONLY)
+      if((file->mode & O_ACCMODE) != O_RDWR)
+         return -EBADFD;
    char *s = kmalloc(len + 1);
    if(!s)
       return -ENOMEM;
@@ -193,6 +196,9 @@ int ttyRead(VFSFile *file,void *string,u64 data)
    default:
       break;
    }
+   if((file->mode & O_ACCMODE) != O_WRONLY)
+      if((file->mode & O_ACCMODE) != O_RDWR)
+         return -EBADFD;
    char *s = kmalloc(data);
    if(!s)
       return -ENOMEM;

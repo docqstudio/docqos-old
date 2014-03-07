@@ -8,7 +8,7 @@ int main(int argc,char *argv[])
 {
    if(argc == 0) /*Run from kernel.*/
    { /*Try to open stdin and stdout.*/
-      int fd1 = open("/dev/tty"),fd2,fd3;
+      int fd1 = open("/dev/tty",O_RDWR),fd2,fd3;
       if(fd1 < 0)
          return -1;
       if(fd1 != 0)
@@ -129,14 +129,14 @@ int shellRunCommand(char *cmd)
 
    int fd;
    if(!shellCommandNeedLookForPath(argv[0]))
-      fd = open(argv[0]);
+      fd = open(argv[0],O_RDONLY);
    else for(int i = 0;i < sizeof(pathenv) / sizeof(pathenv[0]);++i)
    {
       int j = 0;
       do{
          pathenv[i][j + 5 + i] = argv[0][j]; /*Copy it!*/
       }while(argv[0][++j] != 0);
-      fd = open(pathenv[i]); /*Exists?*/
+      fd = open(pathenv[i],O_RDONLY); /*Exists?*/
       if(fd >= 0 && (argv[0] = pathenv[i]))
          break;
    }

@@ -441,7 +441,7 @@ int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters
    memcpy((void *)&arguments[pos],(const void *)argv,size);
 next:;
    Task *current = getCurrentTask();
-   VFSFile *file = openFile(path);
+   VFSFile *file = openFile(path,O_RDONLY);
    if(isErrorPointer(file))
       return getPointerError(file);
    if(current->mm)
@@ -457,6 +457,16 @@ next:;
       ret = elf64Execve(file,0,0,0,regs); /*There aren't arguments.*/
    if(ret)
       goto failed;
+
+   for(int j = 0;j < TASK_MAX_FILES;++j)
+   {
+      VFSFile **file = &current->files->fd[j];
+      if(!*file || !((*file)->mode & O_CLOEXEC))
+         continue;
+      closeFile(*file);
+      *file = 0;
+   }
+
    return 0;
 failed:
    closeFile(file);
