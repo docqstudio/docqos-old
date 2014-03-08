@@ -108,7 +108,7 @@ int shellRunCommand(char *cmd)
 
    while(*cmd == ' ')
       ++cmd; /*Skip ' '.*/
-   if(*cmd == '\0')
+   if(*cmd == '\0' || *cmd == '\n')
       return 0;
    /*Child process.*/
    const char *argv[10];

@@ -1,6 +1,7 @@
 #include <core/const.h>
 #include <cpu/io.h>
 #include <video/console.h>
+#include <time/rtc.h>
 
 #define RTC_ADDRESS_REG 0x70
 #define RTC_DATA_REG    0x71
@@ -32,7 +33,7 @@ static u64 mktime(u16 year,u8 month,u8 day,u8 hour,u8 minute,u8 second)
       year * 365 - 719499) * 24 + hour) * 60 + minute) * 60 + second;
 } /*Make the Unix timestamp.*/
 
-u64 readRTC(void)
+int kernelReadRTC(RTCTime *time)
 {
    u8 second,minute,hour,day,month,year;
    u8 lsecond,lminute,lhour,lday,lmonth,lyear;
@@ -82,10 +83,25 @@ u64 readRTC(void)
    }
    if((rb & 2) == 0)
       hour += 12;
-   hour %= 24;
+   hour %= 24; 
 
-   u64 retval;
-   retval = mktime((u16)year + 2000,month,day,hour,minute,second);
-   return retval;
+   time->year = year;
+   time->year += 2000; /*Start from 2000.*/
+   time->month = month;
+   time->day = day;
+   time->hour = hour;
+   time->minute = minute;
+   time->second = second;
+           /*Set the time.*/
+
+   return 0;
 }
 
+u64 readRTC(void)
+{
+   RTCTime time;
+   kernelReadRTC(&time); /*Read it!*/
+   return mktime(time.year,time.month,time.day,
+                 time.hour,time.minute,time.second);
+             /*Make the UNIX Timestamp.*/
+}

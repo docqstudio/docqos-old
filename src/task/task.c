@@ -159,7 +159,8 @@ static int idle(void)
   
    schedule();
 
-   for(;;);
+   for(;;)
+      asm volatile("hlt");
    return 0;
 }
 
@@ -347,6 +348,7 @@ int doExit(int n)
    current->mm = 0;
    current->fs = 0;
    current->files = 0;
+   current->activeMM = 0;
 
    lockSpinLock(&taskLock);
    for(ListHead *list = current->children.next;list != &current->children;
@@ -442,13 +444,18 @@ int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters
 next:;
    Task *current = getCurrentTask();
    VFSFile *file = openFile(path,O_RDONLY);
+   TaskMemory *old = current->mm;
+   TaskMemory *new = 0;
    if(isErrorPointer(file))
       return getPointerError(file);
-   if(current->mm)
-      taskExitMemory(current->mm);
-   current->mm = taskForkMemory(0,ForkShareNothing);
-   if(!current->mm)
+   
+   current->activeMM = current->mm =
+           taskForkMemory(0,ForkShareNothing);
+   new = current->mm;
+   ret = -ENOMEM;
+   if(!current->mm) /*Failed to alloc */
       goto failed;
+   
    taskSwitchMemory(0,current->mm);
    current->mm->exec = file;
    if(pos && i && size) /*There are arguments.*/
@@ -464,14 +471,18 @@ next:;
       if(!*file || !((*file)->mode & O_CLOEXEC))
          continue;
       closeFile(*file);
+             /*Close the files which have set the O_CLOEXEC mode.*/
       *file = 0;
    }
-
+   if(old)
+      taskExitMemory(old);
    return 0;
 failed:
-   closeFile(file);
-   current->mm->exec = 0;
-   doExit(ret);
+   taskSwitchMemory(0,old);
+   if(new && ((new->exec = 0) || 1))
+      taskExitMemory(new);
+   current->mm = old; /*Restore the mm field.*/
+   closeFile(file); /*Close the file.*/
    return ret;
 }
 

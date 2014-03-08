@@ -8,8 +8,8 @@
 
 extern void *endAddressOfKernel; /*See also ldscripts/kernel.lds.*/
                                  /*It will init in start/cstart.c.*/
-static PhysicsPage *memoryMap = 0;
-static u64 physicsPageCount = 0;
+static PhysicsPage *memoryMap;
+static u64 physicsPageCount;
 
 static ListHead buddyFreeList[MAX_ORDER];
 /*MAX_ORDER is 11,so we can get 2^(MAX_ORDER - 1)*PAGE_SIZE = 4MB memory once at most.*/
@@ -61,7 +61,7 @@ int initBuddySystem(void)
       initPhysicsPage(memoryMap + i);
    }
 
-   endAddressOfKernel += physicsPageCount*sizeof(PhysicsPage) + 1;
+   endAddressOfKernel += physicsPageCount * sizeof(PhysicsPage) + 1;
    printk("The last physics page address: 0x%p,the size of physics pages: %ldKB.\n",
       endAddressOfKernel,
       physicsPageCount * sizeof(PhysicsPage)/1024 + 1);
@@ -103,6 +103,7 @@ int freePages(PhysicsPage *page,unsigned int order)
    atomicSet(&targetPage->count,0);
    listAddTail(&targetPage->list,&buddyFreeList[order]);
    unlockSpinLock(&buddySpinLock[order]);
+   
    return 0;
 }
 
