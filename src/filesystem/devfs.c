@@ -7,6 +7,7 @@
 
 typedef struct DevfsINode{
    char name[15];
+   u32 mode;
    BlockDevicePart *part;
    VFSFileOperation *operation;
    ListHead children;
@@ -105,10 +106,10 @@ static int devfsLookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
           /*Foreach its child dirs.*/
       if(memcmp(next->name,name,len) == 0) /*Is is the dir we are looking for?*/
       {
-         result->type = VFSDentryBlockDevice; /*Block device file.*/
          result->inode->part = next->part; 
          result->inode->operation = &devfsINodeOperation;
          result->inode->data = next;
+         result->inode->mode = next->mode;
          return 0;
       }
    }
@@ -120,9 +121,9 @@ static int devfsMount(BlockDevicePart *part __attribute__ ((unused))
 { /*Just ingore part.*/
    FileSystem *fs = &devfs;
    mnt->root->inode->data = &devfsRoot; /*Set some fields.*/
-   mnt->root->type = VFSDentryDir;
    mnt->root->inode->operation = &devfsINodeOperation;
-   
+   mnt->root->inode->mode = S_IFDIR | S_IRWXU;
+
    lockSpinLock(&fs->lock);
    if(listEmpty(&fs->mounts))
       goto out;
@@ -194,6 +195,7 @@ int devfsRegisterBlockDevice(BlockDevicePart *part,const char *name)
    memcpy(inode->name,name,len + 1);
    inode->part = part;
    inode->operation = 0;
+   inode->mode = S_IFBLK | S_IRWXU;
 
    if(devfsRootDentry)
       downSemaphore(&devfsRootDentry->inode->semaphore);
@@ -224,6 +226,7 @@ int devfsRegisterDevice(VFSFileOperation *operation,const char *name)
    memcpy(inode->name,name,len + 1);
    inode->part = 0;
    inode->operation = operation;
+   inode->mode = S_IFCHR | S_IRWXU;
 
    if(devfsRootDentry)
       downSemaphore(&devfsRootDentry->inode->semaphore);

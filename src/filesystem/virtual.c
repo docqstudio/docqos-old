@@ -289,9 +289,8 @@ static VFSDentry *vfsLookUp(const char *__path)
       VFSDentry *dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
       if(dentry)
       {
-         const VFSDentryType type = dentry->type;
-         if(type == VFSDentryDir &&
-            (ret = dentry))
+         ret = dentry;
+         if(S_ISDIR(ret->inode->mode))
             goto next;
          ret = dentry;
          goto failed;
@@ -305,7 +304,7 @@ static VFSDentry *vfsLookUp(const char *__path)
          if(unlikely(!new) && (upSemaphore(&ret->inode->semaphore) || 1))
             goto failed;
          error = (*ret->inode->operation->lookUp)(ret,new,path);
-         if((error || new->type != VFSDentryDir) && (upSemaphore(&ret->inode->semaphore) || 1)) 
+         if((error || !S_ISDIR(new->inode->mode)) && (upSemaphore(&ret->inode->semaphore) || 1)) 
                                                     /*Try to look it up in disk.*/
             goto failedWithNew;
          new->parent = ret;
@@ -442,13 +441,8 @@ BlockDevicePart *openBlockDeviceFile(const char *path)
    VFSDentry *dentry = vfsLookUp(path);
    if(!dentry)
       return 0;
-   if(dentry->type != VFSDentryBlockDevice)
-      goto failed; 
-      /*Don't need lock dentry->lock.*/
-      /*Block device file's type will never change.*/
-      /*Instead,a VFSDentryDir dentry can change to a VFSDentryMount dentry.*/
-      /*A VFSDentryMount dentry can also change to a VFSDentryDir dentry.*/
-      /*So if we check 'if(dentry->type == VFSDentryMount)',we need to lock dentry->lock.*/
+   if(!S_ISBLK(dentry->inode->mode))
+      goto failed; /*Not a block device.*/
    BlockDevicePart *part = dentry->inode->part;
    vfsLookUpClear(dentry);
    return part;
@@ -465,7 +459,7 @@ VFSFile *openFile(const char *path,int mode)
    VFSDentry *dentry = vfsLookUp(path);
    if(!dentry)
       return (VFSFile *)makeErrorPointer(-ENOENT);
-   if((mode & O_DIRECTORY) && (dentry->type != VFSDentryDir))
+   if((mode & O_DIRECTORY) && !S_ISDIR(dentry->inode->mode))
       return (VFSFile *)makeErrorPointer(-ENOTDIR);
 
    VFSFile *file = createFile(dentry);
@@ -496,7 +490,7 @@ int closeFile(VFSFile *file)
 
 int readFile(VFSFile *file,void *buf,u64 size)
 {
-   if(file->dentry->type == VFSDentryDir)
+   if(S_ISDIR(file->dentry->inode->mode))
       return -EISDIR;
    if(!file->operation->read)
       return -EBADFD;
@@ -506,7 +500,7 @@ int readFile(VFSFile *file,void *buf,u64 size)
 
 int writeFile(VFSFile *file,const void *buf,u64 size)
 {
-   if(file->dentry->type == VFSDentryDir)
+   if(S_ISDIR(file->dentry->inode->mode))
       return -EISDIR;
    if(!file->operation->write)
       return -EBADFD;
@@ -516,7 +510,7 @@ int writeFile(VFSFile *file,const void *buf,u64 size)
 
 int lseekFile(VFSFile *file,s64 offset,int type)
 {
-   if(file->dentry->type == VFSDentryDir)
+   if(S_ISDIR(file->dentry->inode->mode))
       return -EISDIR;
    if(!file->operation->lseek)
       return -EBADFD;
@@ -630,7 +624,7 @@ int doGetDents64(int fd,void *data,u64 size)
    VFSFile *file = current->files->fd[fd];
    if(!file)
       return -EBADF;
-   if(file->dentry->type != VFSDentryDir)
+   if(!S_ISDIR(file->dentry->inode->mode))
       return -ENOTDIR;
    int ret = (*file->operation->readDir)(file,&vfsFillDir64,__data);
    if(ret < 0) /*Call the readdir function.*/
@@ -643,7 +637,7 @@ int doChdir(const char *dir)
    VFSDentry *dentry = vfsLookUp(dir);
    if(!dentry)
       return -ENOENT;
-   if(dentry->type != VFSDentryDir)
+   if(!S_ISDIR(dentry->inode->mode))
       return (vfsLookUpClear(dentry),-ENOTDIR);
    Task *current = getCurrentTask();
    if(current->fs->pwd)
@@ -657,7 +651,7 @@ int doChroot(const char *dir)
    VFSDentry *dentry = vfsLookUp(dir);
    if(!dentry)
       return -ENOENT;
-   if(dentry->type != VFSDentryDir)
+   if(!S_ISDIR(dentry->inode->mode))
       return (vfsLookUpClear(dentry),-ENOTDIR);
    Task *current = getCurrentTask();
    vfsLookUpClear(current->fs->root);
@@ -725,7 +719,7 @@ found:
       __destoryDentry(old);
    if(part)
       part->fileSystem = fs;
-   if(mnt->root->type != VFSDentryDir)
+   if(!S_ISDIR(mnt->root->inode->mode))
       goto failed;
    VFSDentry *dentry = vfsLookUp(point);
    if(!dentry) /*Find the dentry of the mount point.*/
@@ -740,7 +734,7 @@ found:
       return -EBUSY;
    }
 
-   if(dentry->type != VFSDentryDir)
+   if(!S_ISDIR(dentry->inode->mode))
    {
       vfsLookUpClear(dentry);
       destoryFileSystemMount(mnt);
@@ -819,10 +813,8 @@ int mountRoot(BlockDevicePart *part)
       VFSDentry *root = createDentry();
       if(unlikely(!root))
          return -ENOMEM;
-      kfree(root->inode); /*We don't need the inode.*/
       root->parent = 0;
-      root->inode = 0;
-      root->type = VFSDentryDir;
+      root->inode->mode = S_IFDIR;
       current->fs->root = root;
       current->fs->pwd = 0;
    }

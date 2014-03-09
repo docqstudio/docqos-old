@@ -85,7 +85,7 @@ static int ttyTaskFunction(void *data)
             if(!reader || position != 0 || queue->data != '\b')
                frameBufferWriteStringInColor(
                   0xff,0xff,0xff,(const char []){queue->data,'\0'},1,
-                  (ticks = 0) || 1); /*We must refresh!*/
+                  (ticks = 0) || (queue->data == '\n' ? !reader : 1)); /*We need refresh!*/
             if(!reader)
                break;
             if(queue->data == '\b' && position == 0)

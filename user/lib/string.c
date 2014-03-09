@@ -5,6 +5,7 @@ const char *strerror(int error)
 {
    /*Error strings of error number.*/
    static const char *string[] = {
+      "Success.",
       "Operation not permitted.",
       "No such file or directory.",
       "No such process.",
@@ -140,7 +141,6 @@ const char *strerror(int error)
       "Operation not possible due to RF-kill.",
       "Memory page has hardware error."
    };
-   --error; /*Error number 1 is the index 0 of the array.*/
-   return (error > 0 && error < sizeof(string) / sizeof(string[0])) ?
+   return (error >= 0 && error < sizeof(string) / sizeof(string[0])) ?
            string[error] : 0; /*Return the error string.*/
 }

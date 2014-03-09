@@ -69,6 +69,11 @@ char *vsprintk(char *buf,const char *string,VarArgsList list)
       else if(--string)       /*Always be true.*/
          with = ' '; /*Align with ' '.*/
 
+      if(*string == '*')
+      {
+         align = varArgsNext(list,unsigned int),++string;
+         goto next;
+      }
       number = string;
       while((c = (*string++)) && (c >= '0') && (c <= '9'));
          ;
@@ -77,6 +82,7 @@ char *vsprintk(char *buf,const char *string,VarArgsList list)
          align += (string[i] - '0') * j;
       ++string;
 
+next:
       while((c = *string++) == 'l')
          ++longlong;
       if(longlong > 2)
@@ -122,7 +128,7 @@ char *vsprintk(char *buf,const char *string,VarArgsList list)
       case 's':
          {
             const char *s = varArgsNext(list,const char *);
-            int len = strlen(s);
+            int len = align ? : strlen(s);
             memcpy((void *)buf,(const void *)s,len);
             buf += len;
             break;

@@ -448,7 +448,11 @@ next:;
    TaskMemory *new = 0;
    if(isErrorPointer(file))
       return getPointerError(file);
-   
+   if(!(file->dentry->inode->mode & S_IXUSR))
+      return -EPERM;
+   if(S_ISDIR(file->dentry->inode->mode))
+      return -EISDIR;
+
    current->activeMM = current->mm =
            taskForkMemory(0,ForkShareNothing);
    new = current->mm;

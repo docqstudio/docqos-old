@@ -146,7 +146,9 @@ int shellRunCommand(char *cmd)
 
    execve(argv[0],argv,0);
 out:
-   write(stdout,"Bad Command!!!\n",0);
+   write(stdout,"Bad Command: ",0);
+   write(stdout,strerror(errno),0);
+   write(stdout,"\n",0);
             /*Can't execve?Maybe this is a bad command.*/
    exit(0);
    return 0;
