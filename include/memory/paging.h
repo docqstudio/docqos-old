@@ -14,7 +14,6 @@
    (pointer)(__ - PAGE_OFFSET);\
 })
 
-
 typedef struct VFSFile VFSFile;
 typedef struct VirtualMemoryArea VirtualMemoryArea;
 
@@ -38,3 +37,11 @@ typedef struct VirtualMemoryArea {
 int doMMap(VFSFile *file,u64 offset,pointer address,u64 len);
 
 int initPaging(void);
+
+inline int pagingFlushTLB(void) __attribute__ ((always_inline));
+
+inline int pagingFlushTLB(void)
+{
+   asm volatile("movq %%cr3,%%rax;movq %%rax,%%cr3":::"memory");
+   return 0;
+}

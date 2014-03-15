@@ -1,4 +1,5 @@
 #include <core/const.h>
+#include <core/math.h>
 #include <memory/paging.h>
 #include <memory/memory.h>
 #include <memory/buddy.h>
@@ -7,6 +8,7 @@
 #include <filesystem/virtual.h>
 #include <task/semaphore.h>
 #include <interrupt/interrupt.h>
+#include <video/console.h>
 
 #define MIN_MAPPING (1024ul*1024*1024*4) /*4GB.*/
 
@@ -48,6 +50,8 @@ static void *allocPDPTE(void *__pml4e,pointer address)
    u64 *ret = (u64 *)getPhysicsPageAddress(page);
    memset(ret,0,0x1000); /*Zero.*/
    pml4e[nr] = ((u64)va2pa(ret)) + 0x007; /*P,R/W and U/S.*/
+
+   referencePage(getPhysicsPage(pml4e));
    return ret;
 }
 
@@ -64,6 +68,8 @@ static void *allocPDE(void *__pdpte,pointer address)
    u64 *ret = (u64 *)getPhysicsPageAddress(page);
    memset(ret,0,0x1000); /*Zero.*/
    pdpte[nr] = ((u64)va2pa(ret)) + 0x007; /*P,R/W and U/S.*/
+
+   referencePage(getPhysicsPage(pdpte));
    return ret;
 }
 
@@ -80,159 +86,110 @@ static void *allocPTE(void *__pde,pointer address)
    u64 *ret = (u64 *)getPhysicsPageAddress(page);
    memset(ret,0,0x1000); /*Zero.*/
    pde[nr] = ((u64)va2pa(ret)) + 0x007; /*P,R/W and U/S.*/
+
+   referencePage(getPhysicsPage(pde));
    return ret;
 }
 
-static int setPTE(void *__pte,pointer address,pointer p)
+static int setPTEEntry(void *__pte,pointer address,pointer p)
 {
    u64 *pte = (u64 *)__pte;
    u64 nr = (address >> 12) & 0x1ff;
    u64 data = pte[nr];
-   if(data & 0x1) /*It has set?*/
-      return -EBUSY;
+   
    pte[nr] = ((u64)p) + 0x007; /*P,R/W and U/S.*/
+
+   if(!(data & 1))
+      referencePage(getPhysicsPage(pte));
+      /*Add the reference count.*/
    return 0;
 }
 
-static int freePTE(void *__pte,int (*pteFreer)(void *data))
+static void *getPDPTE(void *__pml4e,pointer address)
 {
-   u64 *pte = (u64 *)__pte;
-   for(int i = 0;i < 512;++i)
-   {
-      if(!(pte[i] & 0x1)) /*Exist?*/
-         continue;
-      (*pteFreer)(pa2va(pte[i] & ~(0x1000 - 1)));
-   }
-   freePages(getPhysicsPage(pte),0);
-   return 0;
+   u64 *pml4e = __pml4e;
+   u64 nr = (address >> 39) & 0x1ff; /*39 - 48 bits.*/
+   u64 data = pml4e[nr];
+   if(!(data & 0x1))
+      return 0; /*It doesn't exist.*/
+   return pa2va(data & ~(0x1000 - 1));
 }
 
-static int freePDE(void *__pde,int (*pteFreer)(void *data))
+static void *getPDE(void *__pdpte,pointer address)
 {
-   u64 *pde = (u64 *)__pde;
-   for(int i = 0;i < 512;++i)
-   {
-      if(!(pde[i] & 0x1)) /*Exist?*/
-         continue;
-      freePTE(pa2va(pde[i] & ~(0x1000 - 1)),pteFreer);
-   }
-   freePages(getPhysicsPage(pde),0);
-   return 0;
+   u64 *pdpte = __pdpte;
+   u64 nr = (address >> 30) & 0x1ff; /*30 - 39 bits.*/
+   u64 data = pdpte[nr];
+   if(!(data & 0x1))
+      return 0; /*It doesn't exist.*/
+   return pa2va(data & ~(0x1000 - 1));
+  
 }
 
-static int freePDPTE(void *__pdpte,int (*pteFreer)(void *data))
+static void *getPTE(void *__pde,pointer address)
 {
-   u64 *pdpte = (u64 *)__pdpte;
-   for(int i = 0;i < 512;++i)
-   {
-      if(!(pdpte[i] & 0x1)) /*Exist?*/
-         continue;
-      freePDE(pa2va(pdpte[i] & ~(0x1000 - 1)),pteFreer);
-   }
-   freePages(getPhysicsPage(pdpte),0);
-   return 0;
+   u64 *pde = __pde;
+   u64 nr = (address >> 21) & 0x1ff; /*21 - 30 bits.*/
+   u64 data = pde[nr];
+   if(!(data & 0x1))
+      return 0; /*It doesn't exist.*/
+   return pa2va(data & ~(0x1000 - 1));
 }
 
-static int freePML4E(void *__pml4e,int (*pteFreer)(void *data))
+static void *getPTEEntry(void *__pte,pointer address)
 {
-   u64 *pml4e = (u64 *)__pml4e;
-   if(!(pml4e[0] & 0x1)) /*Exist?*/
+   u64 *pte = __pte;
+   u64 nr = (address >> 12) & 0x1ff; /*12 - 21 bits.*/
+   u64 data = pte[nr];
+   if(!(data & 0x1))
+      return 0; /*It doesn't exist.*/
+   return pa2va(data & ~(0x1000 - 1));
+}
+
+static int clearPTEEntry(void *__pml4e,void *__pdpte,void *__pde,void *__pte,pointer address)
+{
+   u64 *pml4e = __pml4e;
+   u64 *pdpte = __pdpte;
+   u64 *pde = __pde;
+   u64 *pte = __pte;
+   u64 nr0 = (address >>= 12) & 0x1ff;
+   u64 nr1 = (address >>= 9) & 0x1ff;
+   u64 nr2 = (address >>= 9) & 0x1ff;
+   u64 nr3 = (address >>= 9) & 0x1ff;
+
+   if(!(pte[nr0] & 0x1))
+      return -ENOENT;
+   pte[nr0] = 0;  /*Clear the PTE Entry.*/
+   if(dereferencePage(getPhysicsPage(pte),0) > 0)
       return 0;
-   freePDPTE(pa2va(pml4e[0] & ~(0x1000 - 1)),pteFreer);
-   freePages(getPhysicsPage(pml4e),0);
+   pde[nr1] = 0; /*Clear the PDE Entry.*/
+   if(dereferencePage(getPhysicsPage(pde),0) > 0)
+      return 0;
+   pdpte[nr2] = 0; /*Clear the PDPTE Entry.*/
+   if(dereferencePage(getPhysicsPage(pdpte),0) > 0)
+      return 0;
+   pml4e[nr3] = 0; /*Clear the PML4E Entry.*/
+   return dereferencePage(getPhysicsPage(pml4e),0);
+}
+
+static int setPTEEntryAttribute(void *__pte,pointer address,u8 write)
+{
+   u64 nr = (address >> 12) & 0x1ff;
+   u64 *pte = __pte;
+   u64 data = pte[nr];
+   if(!(data & 1))
+      return -ENOENT;
+   data &= ~0xffful;
+   data += write ? 0x07 : 0x05;
+      /*R/W U/S P : 0x7 .*/
+      /*U/S P : 0x5 .*/
+   pte[nr] = data; 
    return 0;
-}
-
-static int mmapPTEFreer(void *data)
-{
-   return freePages(getPhysicsPage(data),0);
-}
-
-static void *copyPTE(void *pde,int nr,
-                     void *__pte,void *(*pteCopier)(void *data))
-{
-   u64 *pte = (u64 *)__pte;
-   void *new = allocPTE(pde,(pointer)nr << 21);
-   for(int i = 0;i < 512;++i)
-   {
-      if(!(pte[i] & 0x1)) /*Exist?*/
-         continue;
-      void *n = (*pteCopier)(pa2va(pte[i] & ~(0x1000 - 1)));
-      if(!n)
-         return 0;
-      setPTE(new,(pointer)i << 12,va2pa(n));
-   }
-   return new;
-}
-
-static void *copyPDE(void *pdpte,int nr,
-                     void *__pde,void *(*pteCopier)(void *data))
-{
-   u64 *pde = (u64 *)__pde;
-   void *new = allocPDE(pdpte,(pointer)nr << 30);
-   for(int i = 0;i < 512;++i)
-   {
-      if(!(pde[i] & 0x1)) /*Exist?*/
-         continue;
-      void *n = copyPTE(new,i,pa2va(pde[i] & ~(0x1000 - 1)),pteCopier);
-      if(!n)
-         return 0;
-   }
-   return new;
-}
-
-static void *copyPDPTE(void *pml4e,int nr,
-                       void *__pdpte,void *(*pteCopier)(void *data))
-{
-   u64 *pdpte = (u64 *)__pdpte;
-   void *new = allocPDPTE(pml4e,(pointer)nr << 39);
-   for(int i = 0;i < 512;++i)
-   {
-      if(!(pdpte[i] & 0x1)) /*Exist?*/
-         continue;
-      void *n = copyPDE(new,i,pa2va(pdpte[i] & ~(0x1000 - 1)),pteCopier);
-      if(!n)
-         return 0; /*Returning zero is OK.*/
-         /*Because new has been set in pml4e since we called allocPDPTE.*/
-         /*And pml4e will be destoried soon!!!!*/
-   }
-   return new;
-}
-
-static void *copyPML4E(void *__pml4e,void *(*pteCopier)(void *data),u8 *failed)
-{
-   u64 *pml4e = (u64 *)__pml4e;
-   void *new = allocPML4E();
-   if(!new || !pml4e) /*If pml4e is nullptr,just return allocPML4E().*/
-      return new;
-   if(!(pml4e[0] & 0x1))
-      return new;
-   void *n = copyPDPTE(new,0,pa2va(pml4e[0] & ~(0x1000 - 1)),pteCopier);
-   if(!n)
-   {
-      if(failed)
-         *failed = 1;
-      return new;
-   }
-   if(failed)
-      *failed = 0;
-      /*pml4e[0]:user page tables*/
-      /*pml4e[1]:kernel page tables,always kernelPDPTEDir*/
-      /*pml4e[2] ~ pml4e[511]:unused*/
-   return new;
-}
-
-static void *mmapPTECopier(void *data)
-{
-   PhysicsPage *page = allocPages(0);
-   void *new = getPhysicsPageAddress(page);
-   memcpy((void *)new,(const void *)data,0x1000);
-   return new;
 }
 
 static VirtualMemoryArea *lookForVirtualMemoryArea(
                           TaskMemory *mm,u64 start)
-{ /*This function looks for the last VirtulMemoryArea that is before 'strart'.*/
+{ /*This function looks for the last VirtulMemoryArea that is before 'start'.*/
   /*This function will return 0 when 1. mm->vm == 0 .*/
   /*                                 2. mm->vm->start + mm->vm->length > start .*/
    VirtualMemoryArea *vma = mm->vm;
@@ -276,6 +233,55 @@ found:
    if(v)
       *v = vma;/*Save it to *v .*/
    return start;
+}
+
+static int __doMUNMap(TaskMemory *mm,VirtualMemoryArea **pvma)
+{
+   VirtualMemoryArea *vma = *pvma;
+   u64 end = vma->start + vma->length;
+   void *pml4e,*pdpte,*pde,*pte;
+   pml4e = mm->page;
+
+   for(u64 address = vma->start & (0x1fful << 39);
+            address < min(1ul << 48,end);
+            address += 1ul << 39)
+   {
+      pdpte = getPDPTE(pml4e,address);
+      if(!pdpte)
+         continue;
+      for(u64 offset0 = vma->start & (0x1fful << 30);
+                offset0 < min(1ul << 39,end - address);
+                offset0 += 1ul << 30)
+      {
+         pde = getPDE(pdpte,offset0);
+         if(!pde)
+            continue;
+         for(u64 offset1 = vma->start & (0x1fful << 21);
+                 offset1 < min(1ul << 30,end - address - offset0);
+                 offset1 += 1ul << 21)
+         {
+            pte = getPTE(pde,offset1);
+            if(!pte)
+               continue;
+            for(u64 offset2 = vma->start & (0x1fful << 12);
+                     offset2 < min(1ul << 21,end - address - offset0 - offset1);
+                     offset2 += 1ul << 12)
+            { /*Foreach the PTE Entries!*/
+               void *entry = getPTEEntry(pte,offset2);
+               if(!entry)
+                  continue;
+               dereferencePage(getPhysicsPage(entry),0);
+               clearPTEEntry(pml4e,pdpte,pde,pte,offset0 + offset1 + offset2 + address);
+                    /*Clear the PTE Entry.*/
+            }
+         }
+      }
+   }
+   *pvma = vma->next; /*Remove vma from the VirtualMemoryArea list.*/
+   if(vma->file)
+      vfsPutFile(vma->file);
+   kfree(vma); /*Free the struct!*/
+   return 0;
 }
 
 int initPaging(void)
@@ -365,20 +371,20 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
    if((s64)start < 0)
       return (s64)start;
    if(address && address != start)
-      return -EBUSY;
+      return -EBUSY; /*In fact,we should still map it!*/
    VirtualMemoryArea *new = kmalloc(sizeof(*new));
-   if(!new)
+   if(!new) /*Alloc the VirtualMemoryArea.*/
       return -ENOMEM;
    new->start = start;
    new->length = len;
    new->file = vfsGetFile(file);
-   new->offset = offset;
+   new->offset = offset; /*Set the fields.*/
    if(vma)
    {
       new->next = vma->next;
       vma->next = new;
       return 0;
-   }
+   } /*Insert vma to current->mm->vm.*/
    new->next = mm->vm;
    mm->vm = new;
    return 0;
@@ -404,61 +410,124 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
       if(!old)
          return old;
       atomicAdd(&old->ref,1);
-      return old;
+      return old; /*Share the struct.*/
    }
    TaskMemory *new = kmalloc(sizeof(*new));
    atomicSet(&new->ref,1);
-   new->page = 0;
+   new->page = allocPML4E(); /*Alloc the PML4E page tables.*/
    new->wait = 0;
    new->exec = 0;
    new->vm = 0;
+   if(!new->page && (kfree(new) || 1))
+      return 0; /*OOM,Out Of Memory.*/
 
-   u8 failed = 0;
-   new->page = copyPML4E(old ? old->page : 0,&mmapPTECopier,&failed);
-   if(failed || !new->page) /*If failed,return zero.*/
+   void *opml4e,*opdpte,*opde,*opte,*oentry;
+   void *pml4e,*pdpte,*pde,*pte;
+   pml4e = pdpte = pde = pte = 0;
+   if(!old)
+      return new; /*We needn't copy page tables.*/
+   if(old->exec)
+      new->exec = vfsGetFile(old->exec); /*Add the reference count.*/
+   if(!old->page)
+      return new;
+   pml4e = new->page;
+   opml4e = old->page;
+   
+   VirtualMemoryArea *vma,*nvma,**pvma;
+        /*The values: vma => the VirtualMemoryArea that we are copying from..*/
+        /*            nvma => the VirtualMemoryArea that we are copying to.*/
+        /*            pvma => the pointer to the previous VirtualMemoryArea's next field.*/
+   vma = old->vm;
+   pvma = &new->vm;
+   while(vma)
    {
-      if(new->page)
-         freePML4E(new->page,&mmapPTEFreer);
-      kfree(new);
-      return 0;
-   }
-   if(old)
-   {
-      if(old->exec)
-         new->exec = vfsGetFile(old->exec);
-      VirtualMemoryArea *vma,*nvma,**pvma;
-      vma = old->vm;
-      pvma = &new->vm;
-      while(vma)
+      nvma = kmalloc(sizeof(*nvma));
+      if(!nvma)
       {
-         nvma = kmalloc(sizeof(*nvma));
-         if(!nvma)
-         {
-            taskExitMemory(new);
-            return 0;
-         }
-         nvma->offset = vma->offset;
-         if(!vma->file)
-            nvma->file = 0;
-         else
-            nvma->file = vfsGetFile(vma->file);
-         nvma->start = vma->start;
-         nvma->length = vma->length;
-         nvma->next = 0;
-
-         *pvma = nvma;
-         pvma = &nvma->next;
-         vma = vma->next;
+         taskExitMemory(new);
+         return 0; /*No memory!*/
       }
+      nvma->offset = vma->offset;
+      if(!vma->file)
+         nvma->file = 0;
+      else
+         nvma->file = vfsGetFile(vma->file);
+      nvma->start = vma->start;
+      nvma->length = vma->length;
+      nvma->next = 0;
+
+      u64 end = vma->start + vma->length;
+      for(u64 address = vma->start & (0x1fful << 39);
+               address < min(1ul << 48,end);
+               address += 1ul << 39) /*Foreach the PML4E Table.*/
+      {
+         opdpte = getPDPTE(opml4e,address); /*Get the PDPTE Table from PML4E Table.*/
+         if(!opdpte)
+            continue;
+         for(u64 offset0 = vma->start & (0x1fful << 30);
+               offset0 < min(1ul << 39,end - address);
+               offset0 += 1ul << 30) /*Foreach the PDPTE Table.*/
+         {
+            opde = getPDE(opdpte,offset0); /*Get the PDE Table from PDPTE Table.*/
+            if(!opde)
+               continue;
+            for(u64 offset1 = vma->start & (0x1fful << 21);
+                  offset1 < min(1ul << 30,end - address - offset0);
+                  offset1 += 1ul << 21) /*Foreach the PDE Table.*/
+            {
+               opte = getPTE(opde,offset1); /*Get the PTE Table frome PDE Table.*/
+               if(!opte)
+                  continue;
+               for(u64 offset2 = vma->start & (0x1fful << 12);
+                     offset2 < min(1ul << 21,end - address - offset0 - offset1);
+                     offset2 += 1ul << 12) /*Foreach the PTE Table.*/
+               {
+                  oentry = getPTEEntry(opte,offset2); 
+                             /*Get the PTE Entry from PTE Table.*/
+                  if(!oentry)
+                     continue;
+                  if(!pdpte)
+                     pdpte = allocPDPTE(pml4e,address);
+                  if(!pdpte)
+                     goto failed;
+                  if(!pde)
+                     pde = allocPDE(pdpte,offset0);
+                  if(!pde)
+                     goto failed;
+                  if(!pte)
+                     pte = allocPTE(pde,offset1);
+                  if(!pte)
+                     goto failed;
+
+                  setPTEEntry(pte,offset2,va2pa(oentry));
+                  setPTEEntry(opte,offset2,va2pa(oentry));
+                          /*Set the entry to the new page tables.*/
+                  setPTEEntryAttribute(pte,offset2,0);
+                  setPTEEntryAttribute(opte,offset2,0);
+                           /*Now we clear the R/W bit!*/
+                  referencePage(getPhysicsPage(oentry));
+                          /*Add 1 to the reference count.*/
+               }
+               pte = 0;
+            }
+            pde = 0;
+         }
+         pdpte = 0;
+      }
+      *pvma = nvma;
+      pvma = &nvma->next;
+      vma = vma->next; /*Next VirtualMemoryArea struct.*/
    }
    return new;
+failed:
+   taskExitMemory(new);
+   return 0;
 }
 
 int taskExitMemory(TaskMemory *old)
 {
    int ref = atomicAddRet(&old->ref,-1);
    Semaphore *wait;
-   VirtualMemoryArea *vma,*__vma;
    switch(ref)
    {
    case 1:
@@ -468,16 +537,9 @@ int taskExitMemory(TaskMemory *old)
          upSemaphore(wait); /*TaskMemory's wait field is for vfork system call.*/
       break;
    case 0:
-      freePML4E(old->page,&mmapPTEFreer);
-      vma = old->vm;
-      while(vma)
-      {
-         __vma = vma->next;
-         if(vma->file && vma->file != old->exec)
-            vfsPutFile(vma->file);
-         kfree(vma);
-         vma = __vma;
-      }
+      while(old->vm)
+         __doMUNMap(old,&old->vm);
+         /*Unmap all virtual memory areas.*/
       if(old->exec)
          vfsPutFile(old->exec);
       kfree(old);
@@ -494,6 +556,9 @@ int doPageFault(IRQRegisters *reg)
    VirtualMemoryArea *vma;
    Task *current = getCurrentTask();
    int retval;
+   void *pml4e,*pdpte,*pde,*pte;
+   void *entry,*data;
+   PhysicsPage *entryPage,*dataPage;
 
    asm volatile("movq %%cr2,%%rax":"=a"(address));
                       /*Get the address which produces this exception.*/
@@ -502,6 +567,7 @@ int doPageFault(IRQRegisters *reg)
    if(address > PAGE_OFFSET)
       return -EFAULT;
    vma = lookForVirtualMemoryArea(current->mm,address);
+                 /*Look for the virtual memory area!*/
    if(!vma && current->mm->vm)
       vma = current->mm->vm;
    else if(!vma || !vma->next)
@@ -520,37 +586,58 @@ int doPageFault(IRQRegisters *reg)
       base = vma->offset + (pos > 0 ? pos : -pos);
    }
 
-   void *pml4e = current->mm->page;
+   pml4e = current->mm->page;
    if(!pml4e)
       current->mm->page = pml4e = allocPML4E();
    if(!pml4e)
       return -ENOMEM;
-   void *pdpte = allocPDPTE(pml4e,address);
+   pdpte = allocPDPTE(pml4e,address);
    if(!pdpte)
       return -ENOMEM;
-   void *pde = allocPDE(pdpte,address);
+   pde = allocPDE(pdpte,address);
    if(!pde)
       return -ENOMEM;
-   void *pte = allocPTE(pde,address);
+   pte = allocPTE(pde,address);
    if(!pte)
       return -ENOMEM; /*Alloc page tables.*/
 
-   void *page = allocPages(0);
-   if(!page)
+   if(reg->irq & 1 /*Exist?*/)
+      goto cow; /*Copy On Write.*/
+
+   dataPage = allocPages(0);
+   if(!dataPage)
       return -ENOMEM;
-   page = getPhysicsPageAddress((PhysicsPage *)page);
+   data = getPhysicsPageAddress(dataPage);
    retval = -EIO;
    if(file)
       if((*file->operation->read)(file,
-         page + (pos < 0 ? -pos : 0),0x1000 - ((pos < 0) ? -pos : 0),&base) < 0)
-      goto failed;
-   retval = -EBUSY;
-   if(setPTE(pte,address,va2pa(page)) < 0)
-      goto failed;
+         data + (pos < 0 ? -pos : 0),0x1000 - ((pos < 0) ? -pos : 0),&base) < 0)
+      goto failed; /*Read the data!*/
+   if(!file)
+      memset(data,0,0x1000); /*Set to zero!*/
+   setPTEEntry(pte,address,va2pa(data));
 
-   asm volatile("movq %%rax,%%cr3"::"a"(va2pa(pml4e))); /*Refresh the TLBs.*/
+   pagingFlushTLB();
    return 0;
 failed:
-   freePages(getPhysicsPage(page),0);
+   freePages(dataPage,0);
    return retval;
+cow:;
+   entry = getPTEEntry(pte,address);
+
+   entryPage = getPhysicsPage(entry);
+   if(atomicRead(&entryPage->count) == 1)
+      goto done; /*Only one task is using it,we needn't copy it!*/
+   dataPage = allocPages(0);
+   if(!dataPage)
+      return -ENOMEM;
+   data = getPhysicsPageAddress(dataPage);
+   memcpy((void *)data,(const void *)entry,0x1000);
+             /*Copy the data.*/
+   setPTEEntry(pte,address,va2pa(data));
+   dereferencePage(entryPage,0); /*Now we don't use the page.*/
+done:
+   setPTEEntryAttribute(pte,address,1 /*Read/Write.*/);
+   pagingFlushTLB();
+   return 0;
 }

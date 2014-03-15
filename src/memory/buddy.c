@@ -81,7 +81,7 @@ int freePages(PhysicsPage *page,unsigned int order)
    if(page->flags & PageReserved)
       return -EPERM;
    if(atomicAddRet(&page->count,-1) != 0)
-      return 0;
+      return 1;
    lockSpinLock(&buddySpinLock[order]);
    while(order < MAX_ORDER - 1)
    {
@@ -228,3 +228,5 @@ u64 getPhysicsPageCount(void)
 {
    return physicsPageCount;
 }
+
+int dereferencePage(PhysicsPage *page,unsigned int order) __attribute__ ((alias("freePages")));

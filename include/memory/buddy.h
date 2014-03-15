@@ -24,12 +24,16 @@ inline void *getPhysicsPageAddress(PhysicsPage *page)
 inline PhysicsPage *getPhysicsPage(void *obj)
    __attribute__ ((always_inline));
 
+inline int referencePage(PhysicsPage *page)
+   __attribute__ ((always_inline));
+
 int initBuddySystem(void);
 
 int freePages(PhysicsPage *page,unsigned int order);
 PhysicsPage *allocPages(unsigned int order);
 PhysicsPage *allocAlignedPages(unsigned int order);
 PhysicsPage *allocDMAPages(unsigned int order,unsigned int max);
+int dereferencePage(PhysicsPage *page,unsigned int order);
 
 u64 getPhysicsPageCount(void);
 PhysicsPage *getMemoryMap(void);
@@ -47,4 +51,9 @@ inline PhysicsPage *getPhysicsPage(void *obj)
    PhysicsPage *memoryMap = getMemoryMap();
    pointer physicsObj = va2pa(obj);
    return (memoryMap + ((physicsObj) >> (3*4)));
+}
+
+inline int referencePage(PhysicsPage *page)
+{
+   return atomicAdd(&page->count,1);
 }

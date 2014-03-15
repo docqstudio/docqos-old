@@ -317,6 +317,7 @@ int doFork(IRQRegisters *regs,ForkFlags flags)
       new->mm->wait = 0;
    }
 
+   pagingFlushTLB(); /*Flush the TLBs.*/
    return new->pid;
 failed:
    if(new->mm)
