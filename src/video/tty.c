@@ -38,6 +38,7 @@ static VFSFileOperation ttyOperation = {
 
 static int ttyTaskFunction(void *data)
 {
+   u8 ctrl,shift;
    u64 rflags;
    unsigned long long int ticks = 0; 
               /*The ticks when we did the lastest refreshing.*/
@@ -79,8 +80,19 @@ static int ttyTaskFunction(void *data)
                ticks = getTicks();
             break;
          case 3: /*Keyboard press.*/
-            queue->data = (*queue->callback)(queue->data);
+            queue->data = (*queue->callback)(queue->data,&shift,&ctrl);
             if(!queue->data)
+               break;
+            if(ctrl && !position && 
+                  (queue->data == 'd' || queue->data == 'D'))
+            { /*Ctrl + D , EOF!*/
+               *reader->s = 0;
+               reader->data = 0; /*No data!*/
+               wakeUpTask(reader->task);
+               reader = 0;
+               break;
+            }
+            if(ctrl)
                break;
             if(!reader || position != 0 || queue->data != '\b')
                frameBufferWriteStringInColor(
@@ -161,7 +173,7 @@ int ttyWrite(VFSFile *file,const void *string,u64 size)
    u8 len = size ? size : strlen(string);
    if(len == 0)
       return 0;
-   if((file->mode & O_ACCMODE) != O_RDONLY)
+   if((file->mode & O_ACCMODE) != O_WRONLY)
       if((file->mode & O_ACCMODE) != O_RDWR)
          return -EBADFD;
    char *s = kmalloc(len + 1);
@@ -196,7 +208,7 @@ int ttyRead(VFSFile *file,void *string,u64 data)
    default:
       break;
    }
-   if((file->mode & O_ACCMODE) != O_WRONLY)
+   if((file->mode & O_ACCMODE) != O_RDONLY)
       if((file->mode & O_ACCMODE) != O_RDWR)
          return -EBADFD;
    char *s = kmalloc(data);
@@ -216,7 +228,7 @@ int ttyRead(VFSFile *file,void *string,u64 data)
    wakeUpTask(ttyTask);
    schedule();
 
-   if(queue->data < 0)
+   if(queue->data <= 0)
       goto out;
    memcpy(string,s,queue->data);
    ((u8 *)string)[queue->data] = '\0'; /*Set end.*/

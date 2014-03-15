@@ -51,6 +51,7 @@ typedef struct Task{
    TaskMemory *activeMM;
 
    u8 waiting;
+   u8 needSchedule;
    int exitCode;
 } Task;
 
@@ -62,7 +63,7 @@ typedef union TaskKernelStack
 
 typedef int (*KernelTask)(void *arg);
 
-inline int enablePreemptionSchedule(void) __attribute__ ((always_inline));
+inline int enablePreemptionNoScheduling(void) __attribute__ ((always_inline));
 inline int enablePreemption(void) __attribute__ ((always_inline));
 inline int disablePreemption(void) __attribute__ ((always_inline));
 inline int preemptionSchedule(void) __attribute__ ((always_inline));
@@ -83,13 +84,12 @@ int wakeUpTask(Task *task);
 int initTask(void) __attribute__ ((noreturn));
 /*It will never return!!!It will be called in the end of kmain.*/
 
-inline int enablePreemptionSchedule(void)
+inline int enablePreemptionNoScheduling(void)
 {
    Task *current = getCurrentTask();
    if(!current)
       return 0;
-   if(!--current->preemption)
-      schedule();
+   --current->preemption;
    return 0;
 }
 
@@ -97,7 +97,9 @@ inline int enablePreemption(void)
 {
    Task *current = getCurrentTask();
    if(current)
-     --current->preemption;
+     if(!--current->preemption && current->state == TaskRunning)
+        if(current->needSchedule)
+           schedule();
    return 0;
 }
 

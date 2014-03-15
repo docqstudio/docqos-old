@@ -207,9 +207,13 @@ int schedule(void)
    ListHead *start = (prev == idleTask) ? &tasks : &prev->list;
 
    u64 rflags;
+repeat:
+   disablePreemption();
    lockSpinLockCloseInterrupt(&scheduleLock,&rflags);
    /*If we schedule successfully,it will be unlocked in finishScheduling.*/
 
+   if(prev->needSchedule)
+      prev->needSchedule = 0;
    for(ListHead *list = start->next;list != start;list = list->next)
    {
       if(list == &tasks)
@@ -233,7 +237,7 @@ int schedule(void)
    if(next == prev)
    {
       unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
-      return 0;
+      goto done;
    }
 
    if(!next->mm) /*Switch to kernel Task?*/
@@ -245,6 +249,11 @@ int schedule(void)
 
    finishScheduling(from);
    restoreInterrupt(rflags);
+done:
+   enablePreemptionNoScheduling();
+
+   if(unlikely(prev->needSchedule))
+      goto repeat;
    return 0;
 }
 

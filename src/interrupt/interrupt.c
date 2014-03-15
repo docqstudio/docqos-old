@@ -19,8 +19,10 @@ static IRQInformation irqHandlerTable[IRQ_COUNT] = {};
 
 int doIRQ(IRQRegisters *reg)
 {
+   Task *current = getCurrentTask();
    int ret = 0;
    IRQInformation *info;
+   disablePreemption();
    switch(reg->irq)
    {
    case LOCAL_TIMER_INT: /*Local APIC Timer Interrupt?*/
@@ -47,11 +49,9 @@ int doIRQ(IRQRegisters *reg)
       break;
    }
    localApicSendEOI(); /*Send EOI to local APIC.*/
-   if(ret == 1)/*Need schedule.*/
-   {
+   enablePreemptionNoScheduling();
+   if(current && current->needSchedule) /*Need schedule.*/
       preemptionSchedule();
-      closeInterrupt();
-   }
    return ret;
 }
 

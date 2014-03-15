@@ -18,6 +18,7 @@
 #define KB_CMD_DSCAN      0xf5
 
 #define KB_DATA_ACK       0xfa
+#define KB_DATA_RESEND    0xfe
 
 #define KB_IRQ            0x01
 
@@ -69,6 +70,8 @@ static const u8 keyboardMapShift[] = {
    '2' ,'3' ,'0' ,'.'
 };
 
+static volatile int status = 0;
+
 static int keyboardOut(int data)
 {
    while(inb(KB_STATUS) & KB_STATUS_BUSY)
@@ -86,6 +89,24 @@ static int keyboardIn(void)
    return inb(KB_DATA);
 }
 
+static int keyboardSetLED(u8 data)
+{
+   while(inb(KB_STATUS) & KB_STATUS_BUSY)
+      asm volatile("pause");
+   status = 0; /*Reset the status.*/
+   outb(KB_DATA,KB_CMD_LED);
+   while(status == 0) /*Wait until it changes.*/
+      asm volatile("hlt");
+
+   while(inb(KB_STATUS) & KB_STATUS_BUSY)
+      asm volatile("pause");
+   status = 0;
+   outb(KB_DATA,data); /*Write the data to the data port.*/
+   while(status == 0)
+      asm volatile("hlt");
+   return 0;
+}
+
 static int keyboardTestIn(void)
 {
    if(inb(KB_STATUS) & KB_STATUS_DATA)
@@ -93,13 +114,12 @@ static int keyboardTestIn(void)
    return 0;
 }
 
-static u8 keyboardCallback(u8 data)
+static u8 keyboardCallback(u8 data,u8 *pshift,u8 *pctrl)
 {
-   static u8 shift = 0,caps = 0,num = 1,scroll = 0;
-#if 0
-   keyboardOut(KB_CMD_LED);
-   keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
-#endif
+   static u8 caps = 0,num = 1,scroll = 0;
+   static u8 shift = 0,ctrl = 0;
+   *pshift = shift;
+   *pctrl = ctrl;
    u8 keypad = 0;
    if(data == 0xe0)
       return 0;
@@ -110,37 +130,32 @@ static u8 keyboardCallback(u8 data)
    {
    case 0x2a:
    case 0x36: /*Right-Shift and Left-Shift.*/
-      shift = !!make;
+      *pshift = shift = !!make;
+      data = 0;
+      break;
+   case 0x1d: /*Right-Ctrl and Left-Ctrl.*/
+      *pctrl = ctrl = !!make;
       data = 0;
       break;
    case 0x3a: /*CapsLock.*/
       if(!make)
          break;
       caps = !caps;
-#if 0
-      keyboardOut(KB_CMD_LED);
-      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
-#endif
+      keyboardSetLED((scroll << 0) | (num << 1) | (caps << 2));
       data = 0;
       break;
    case 0x45: /*NumLock.*/
       if(!make)
          break;
       num = !num;
-#if 0
-      keyboardOut(KB_CMD_LED);
-      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
-#endif
+      keyboardSetLED((scroll << 0) | (num << 1) | (caps << 2));
       data = 0;
       break;
    case 0x46: /*ScrollLock.*/
       if(!make)
          break;
       scroll = !scroll;
-#if 0
-      keyboardOut(KB_CMD_LED);
-      keyboardOut((scroll << 0) | (num << 1) | (caps << 2));
-#endif
+      keyboardSetLED((scroll << 0) | (num << 1) | (caps << 2));
       data = 0;
       break;
    default:
@@ -163,9 +178,9 @@ static u8 keyboardCallback(u8 data)
       if(('a' <= data) && (data <= 'z'))
          if(shift ^ caps)
             data -= 'a' - 'A'; /*To the supper case.*/
-      break;
+      return data;
    }
-   return data;
+   return 0;
 }
 
 
@@ -174,7 +189,10 @@ static int keyboardIRQ(IRQRegisters *reg,void *unused)
    u8 data;
    while(inb(KB_STATUS) & KB_STATUS_DATA){
       data = inb(KB_DATA); /*Get scan code and put it into keyboardBuffer.*/
-      ttyKeyboardPress(&keyboardCallback,data);
+      if((data == KB_DATA_ACK || data == KB_DATA_RESEND))
+         status = data; /*Received ACK or RESEND!!*/
+      else
+         ttyKeyboardPress(&keyboardCallback,data);
       inb(KB_STATUS);
    }
    return 0;
@@ -199,6 +217,8 @@ static int initKeyboard(void)
       return -EIO; /*Exist,but failed to init it.*/
 
    requestIRQ(KB_IRQ,&keyboardIRQ);
+   keyboardSetLED(0x2);
+      /*Init the keyboard LED status.*/
    return 0;
 }
 

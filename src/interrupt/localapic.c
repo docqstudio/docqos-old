@@ -14,7 +14,7 @@
 #define LOCAL_APIC_LVT           0x320 /*Local Vector Table(LVT). (Timer.)*/
 #define LOCAL_APIC_TICR          0x380 /*Initial Count For Timer.*/
 #define LOCAL_APIC_TCCR          0x390 /*Current Count For Timer.*/
-#define LOCAL_APIC_TDCR          0x3e0 /*Device Configuration For Timer.*/
+#define LOCAL_APIC_TDCR          0x3e0 /*Divide Configuration For Timer.*/
 
 static u8 *localApicAddress = 0;
 
@@ -44,6 +44,11 @@ int setupLocalApicTimer(int disable,u32 time)
    localApicOut(LOCAL_APIC_LVT,
       disable ? 0x0 : (LOCAL_TIMER_INT | 0x20000));
    return 0;
+}
+
+u32 getLocalApicTimerCounter(void)
+{
+   return localApicIn(LOCAL_APIC_TCCR);
 }
 
 int initLocalApic(void)

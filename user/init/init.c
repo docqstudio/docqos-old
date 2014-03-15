@@ -168,9 +168,12 @@ int shell(void)
       cwd[27 + i] = ' ';
       cwd[28 + i] = '\0';
       write(stdout,cwd,0);
-      read(stdin,(void *)cmd,sizeof(cmd) - 3);
+      i = read(stdin,(void *)cmd,sizeof(cmd) - 3);
       
-      shellRunCommand((char *)cmd); /*Try to run this command.*/
+      if(i > 0) /*EOF?*/
+         shellRunCommand((char *)cmd); /*Try to run this command.*/\
+      else
+         write(stdout,"\n",0);
    }
    write(stdout,"Goodbye!\n",0);
    return 0;
