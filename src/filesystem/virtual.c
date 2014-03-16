@@ -1,7 +1,7 @@
 #include <core/const.h>
 #include <core/hlist.h>
 #include <cpu/rcu.h>
-#include <filesystem/block.h>
+#include <block/block.h>
 #include <filesystem/virtual.h>
 #include <memory/kmalloc.h>
 #include <task/task.h>
@@ -72,12 +72,15 @@ static VFSDentry *createDentry(void)
    dentry->mnt = 0;
    dentry->mounted = 0;
    initSemaphore(&dentry->inode->semaphore);
+   initRadixTreeRoot(&dentry->inode->cache.radix);
+   dentry->inode->cache.inode = dentry->inode;
    return dentry;
 }
 
 static int __destoryDentry(void *data)
 {
    VFSDentry *dentry = data;
+   destoryRadixTreeRoot(&dentry->inode->cache.radix);
    if(dentry->name)
       kfree(dentry->name);
    kfree(dentry->inode);

@@ -1,8 +1,10 @@
 #include <core/const.h>
+#include <core/math.h>
 #include <filesystem/virtual.h>
-#include <filesystem/block.h>
+#include <block/block.h>
 #include <lib/string.h>
 #include <video/console.h>
+#include <memory/buddy.h>
 
 static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount);
 static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
@@ -10,6 +12,8 @@ static int iso9660Open(VFSDentry *dentry,VFSFile *file,int mode);
 static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek);
 static int iso9660LSeek(VFSFile *file,s64 offset,int type);
 static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data);
+static int iso9660PutPage(PhysicsPage *page);
+static PhysicsPage *iso9660GetPage(VFSINode *inode,u64 offset);
 
 static FileSystem iso9660FileSystem = {
    .mount = &iso9660Mount,
@@ -29,6 +33,12 @@ static VFSFileOperation iso9660FileOperation = {
    .lseek = &iso9660LSeek,
    .readDir = &iso9660ReadDir,
    .close = 0
+};
+
+static PageCacheOperation iso9660PageCacheOperation = {
+   .getPage = &iso9660GetPage,
+   .putPage = &iso9660PutPage,
+   .flushPage = 0
 };
 
 /*See also http://wiki.osdev.org/ISO_9660.*/
@@ -72,7 +82,7 @@ static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount)
    mount->root->inode->start = *(u32 *)(buffer + 156 + 2);
    mount->root->inode->start *= 2048; 
        /*Location of extent (LBA) in both-endian format.*/
-   mount->root->inode->size = (u64)-1; /*Unknow,set max.*/
+   mount->root->inode->size = *(u32 *)(buffer + 156 + 10);
    mount->root->inode->inodeStart = io.start + 156 + 2;
    mount->root->inode->operation = &iso9660INodeOperation;
    mount->root->inode->part = part;
@@ -201,56 +211,92 @@ nofilename:
    return *data;
 }
 
+static int iso9660ReadPage(VFSINode *inode,PhysicsPage *page,unsigned int index)
+{
+   BlockIO io = {
+      .part = inode->part,
+      .start = (index << 12) + inode->start,
+      .size = 4096,
+      .buffer = getPhysicsPageAddress(page),
+      .read = 1
+   };
+   return submitBlockIO(&io);
+}
+
+static PhysicsPage *iso9660GetPage(VFSINode *inode,u64 offset)
+{
+   downSemaphore(&inode->semaphore);
+   PhysicsPage *retval =
+         getPageFromPageCache(&inode->cache,offset >> 12,&iso9660ReadPage);
+   upSemaphore(&inode->semaphore);
+   return retval;
+}
+
+static int iso9660PutPage(PhysicsPage *page)
+{
+   downSemaphore(&page->cache->inode->semaphore);
+   putPageIntoPageCache(page);
+   upSemaphore(&page->cache->inode->semaphore);
+   return 0;
+}
+
 static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
 {
    if(!S_ISDIR(dentry->inode->mode))
       return -ENOTDIR;
-   u8 buffer[2048];
    VFSINode *inode = dentry->inode;
-   BlockIO io;
-   u8 needRead = 1,length = strlen(name);
-   u64 pos = 0;
+   u8 length = strlen(name);
+   u64 pos = 0,realPosition = 0;
+   PhysicsPage *page = getPageFromPageCache(&inode->cache,0,&iso9660ReadPage);
+   if(!page) /*Get the page from the page cache.*/
+      return -EIO;
+   u8 *buffer = getPhysicsPageAddress(page);
+       /*Get the page address.*/
 
    const char *filename;
    u64 mode,size,lba;
    u8 namelength;
 
-   io.part = inode->part;
-   io.read = 1;
-   io.buffer = buffer;
-   io.size = 2048;
-   io.start = inode->start;
-   for(;;)
+   while(realPosition < inode->size)
    {
-      while(pos > 2048)
+      u8 retval;
+      if(pos > 0x1000)
       {
-         pos -= 2048;
-         io.start += 0x800;
-         needRead = 1; /*Read again.*/
-      }
-      if(needRead)
-         if(submitBlockIO(&io))
+         pos &= 0xfff;
+         putPageIntoPageCache(page); /*Put this page.*/
+         page = getPageFromPageCache(&inode->cache,realPosition >> 12,&iso9660ReadPage);
+         if(!page) /*Get the page again.*/
             return -EIO;
-      needRead = 0;
-      u8 retval = iso9660GetDentryInformation(
+         buffer = getPhysicsPageAddress(page);
+      }
+      retval = iso9660GetDentryInformation(
          &buffer[pos],&filename,&mode,&size,&lba,&namelength);
                /*Get the data.*/
       if(!retval)
-         return -ENOENT;
+      {
+         pos = (pos + 0x7ff) & ~0x7ff; /*Next block.*/
+         realPosition = (realPosition + 0x7ff) & ~0x7ff;
+         continue;
+      }
       pos += retval;
+      realPosition += retval;
       if(length != namelength)
          continue;
       if(memcmp(name,filename,length))
          continue;
-      result->inode->inodeStart = io.start + pos;
+      result->inode->inodeStart = inode->start + pos;
       result->inode->size = size;
       result->inode->start = lba * 2048;
       result->inode->operation = &iso9660INodeOperation;
       result->inode->part = inode->part;
       result->inode->mode = mode;
+      result->inode->cache.operation = &iso9660PageCacheOperation;
+            /*Init the fields of result.*/
+      putPageIntoPageCache(page);
       return 0;
    }
-   return -EINVAL; /*Never arrive here.*/
+   putPageIntoPageCache(page);
+   return -ENOENT;
 }
 
 static int iso9660Open(VFSDentry *dentry,VFSFile *file,int mode)
@@ -266,8 +312,8 @@ static int iso9660Open(VFSDentry *dentry,VFSFile *file,int mode)
 
 static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek)
 {
+   u64 retval = 0;
    VFSINode *inode = file->dentry->inode;
-   BlockIO io;
    if(*seek + size < *seek) /*If too long,return.*/
       return -EINVAL;
    if(*seek >= inode->size) /*If seek is not true,return.*/
@@ -277,15 +323,26 @@ static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek)
       /*Just set it too max bytes we can read.*/
    if(size == 0)
       return 0;
-   io.part = inode->part;
-   io.start = inode->start + *seek;
-   io.size = size;
-   io.read = 1;
-   io.buffer = buf;
-   if(submitBlockIO(&io)) /*Try to read.*/
-      return -EIO;
-   *seek += size; /*Add for reading next time.*/
-   return size; /*Return how many bytes we have read.*/
+
+   downSemaphore(&inode->semaphore);
+   while(size > 0)
+   {
+      PhysicsPage *page = getPageFromPageCache(
+              &inode->cache,*seek >> 12,&iso9660ReadPage);
+                  /*Get the page.*/
+      if(!page)
+         return -EIO;
+      void *addr = getPhysicsPageAddress(page);
+      u64 read = min(size,0x1000 - (*seek & 0xfff));
+      memcpy(buf,addr + (*seek & 0xfff),read); /*Copy to the buffer.*/
+      *seek += read;
+      size -= read;
+      retval += read;
+      putPageIntoPageCache(page); /*Put the page.*/
+   }
+   upSemaphore(&inode->semaphore);
+
+   return retval; /*Return how many bytes we have read.*/
 }
 
 static int iso9660LSeek(VFSFile *file,s64 offset,int type)
@@ -310,23 +367,30 @@ static int iso9660LSeek(VFSFile *file,s64 offset,int type)
 
 static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)
 {
-   u8 buf[2048];
-   BlockIO io;
-   u64 pos = 0;
-   u8 needRead = 1;
+   VFSINode *inode = file->dentry->inode;
+   PhysicsPage *page;
+   u8 *buf;
+   u64 pos,realPosition;
 
-   io.read = 1;
-   io.part = file->dentry->inode->part;
-   io.start = file->seek + file->dentry->inode->start;
-   io.size = sizeof(buf);
-   io.buffer = buf;
-   for(;;)
+   downSemaphore(&inode->semaphore);
+   pos = realPosition = file->seek;
+   page = 
+      getPageFromPageCache(&inode->cache,pos >> 12,&iso9660ReadPage);
+   if(!page)
+      goto failed;
+   buf = getPhysicsPageAddress(page);
+   pos &= 0xfff;
+   while(realPosition < inode->size)
    {
-      while(pos > 2048)
-         (pos -= 2048),(io.start += 2048),(needRead = 1);
-      if(needRead)
-         if(submitBlockIO(&io) < 0)
-            return -EIO; /*I/O Error!*/
+      if(pos >= 0x1000) 
+      {
+         pos &= 0xfff;
+         putPageIntoPageCache(page);
+         page = getPageFromPageCache(&inode->cache,realPosition >> 12,&iso9660ReadPage);
+         if(!page) /*Get the page again.*/
+            return -EIO;
+         buf = getPhysicsPageAddress(page);
+      }
       const char *filename;
       u64 mode,size,lba;
       u8 length;
@@ -334,14 +398,25 @@ static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data)
          &buf[pos],&filename,&mode,&size,&lba,&length);
                /*Get the data.*/
       if(!retval)
-         break;
+      {
+         realPosition = (realPosition + 0x7ff) & ~0x7ff;
+         pos = (pos + 0x7ff) & ~0x7ff;
+         continue;
+      }
       pos += retval;
+      realPosition += retval;
       if((*filler)(data,!!S_ISDIR(mode),length,filename) < 0)
          break; /*Fill the buffer.*/
    }
    u64 old = file->seek;
-   file->seek = pos; /*Update the seek.*/
-   return pos - old;
+   file->seek = realPosition; /*Update the seek.*/
+   putPageIntoPageCache(page);
+   upSemaphore(&inode->semaphore);
+   return realPosition - old;
+failed:
+   putPageIntoPageCache(page); /*Put the page.*/
+   upSemaphore(&inode->semaphore);
+   return -EIO;
 }
 
 static int initISO9660(void)

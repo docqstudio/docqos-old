@@ -37,6 +37,10 @@ typedef struct ELF64ProgramHeader{
    u64 align;
 } ELF64ProgramHeader;
 
+#define PF_X 0x1
+#define PF_W 0x2
+#define PF_R 0x4
+
 int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
 {
    ELF64Header header;
@@ -68,14 +72,24 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
          continue;
       if(phdrs[i].memsz == 0)
          continue;
+      int prot = PROT_NONE;
+      if(phdrs[i].flags & PF_X)
+         prot |= PROT_EXEC;
+      if(phdrs[i].flags & PF_W)
+         prot |= PROT_WRITE;
+      if(phdrs[i].flags & PF_R)
+         prot |= PROT_READ;
       if(phdrs[i].filesz == 0) /*The data is not in file!!!!*/
-         retval = doMMap(0,0,phdrs[i].vaddr,phdrs[i].memsz);
+         retval = doMMap(0,0,phdrs[i].vaddr,
+             phdrs[i].memsz,prot,MAP_ANONYMOUS | MAP_FIXED | MAP_PRIVATE);
       else
-         retval = doMMap(file,phdrs[i].offset,phdrs[i].vaddr,phdrs[i].memsz);
+         retval = doMMap(file,phdrs[i].offset,phdrs[i].vaddr,
+              phdrs[i].memsz,prot,MAP_FIXED | MAP_PRIVATE);
       if(retval)
          return retval;
    }
-   if((retval = doMMap(0,0,0xffffe000,0x2000)))
+   if((retval = doMMap(0,0,0xffffe000,0x2000,
+        PROT_WRITE | PROT_READ,MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE)))
       return retval;
        /*Map the user stack,from 0xffffe000 to 0xffffffff.*/
        /*(4GB - 8K) ~ 4GB.*/

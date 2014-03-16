@@ -5,10 +5,13 @@
 
 #define PHYSICS_PAGE_SIZE    0x1000
 
+typedef struct PageCache PageCache;
+
 typedef enum PhysicsPageFlags{
    PageReserved = (1 << 0),
    PageData     = (1 << 1),
-   PageSlab     = (1 << 2)
+   PageSlab     = (1 << 2),
+   PagePageCache= (1 << 3)
 } PhysicsPageFlags;
 
 typedef struct PhysicsPage{
@@ -16,6 +19,7 @@ typedef struct PhysicsPage{
    PhysicsPageFlags flags;
    AtomicType count;
    u64 data;
+   PageCache *cache;
 } PhysicsPage;
 
 inline void *getPhysicsPageAddress(PhysicsPage *page)
@@ -24,7 +28,7 @@ inline void *getPhysicsPageAddress(PhysicsPage *page)
 inline PhysicsPage *getPhysicsPage(void *obj)
    __attribute__ ((always_inline));
 
-inline int referencePage(PhysicsPage *page)
+inline PhysicsPage *referencePage(PhysicsPage *page)
    __attribute__ ((always_inline));
 
 int initBuddySystem(void);
@@ -53,7 +57,8 @@ inline PhysicsPage *getPhysicsPage(void *obj)
    return (memoryMap + ((physicsObj) >> (3*4)));
 }
 
-inline int referencePage(PhysicsPage *page)
+inline PhysicsPage *referencePage(PhysicsPage *page)
 {
-   return atomicAdd(&page->count,1);
+   atomicAdd(&page->count,1);
+   return page;
 }

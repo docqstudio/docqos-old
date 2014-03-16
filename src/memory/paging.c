@@ -361,7 +361,8 @@ int initPaging(void)
 }
 
 
-int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
+int doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
+              int prot,int flags)
 {
    Task *current = getCurrentTask();
    TaskMemory *mm = current->mm;
@@ -370,15 +371,35 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len)
 
    if((s64)start < 0)
       return (s64)start;
-   if(address && address != start)
-      return -EBUSY; /*In fact,we should still map it!*/
+   if(prot == PROT_NONE)
+      return 0; /*Nothing to do.*/
+   if((prot & PROT_WRITE) && !(prot & PROT_READ))
+      return -EINVAL; /*Can write,but can't read?*/
+   if((flags & MAP_FIXED) && address && address != start)
+      return -EBUSY;  /*Can't map to address.*/
+   if(!(flags & MAP_ANONYMOUS) && !file)
+      return -EINVAL; /*Invaild file.*/
+   if(!(flags & MAP_ANONYMOUS) && (offset & 0xfff))
+      return -EINVAL; /*Invaild offset!*/
+   if(!(flags & MAP_ANONYMOUS) 
+       && !(flags & MAP_PRIVATE) && (prot & PROT_WRITE))
+      return -EPROTONOSUPPORT; /*We don't support!*/
+   if(!(flags & MAP_ANONYMOUS) 
+      && !(file->dentry->inode->cache.operation->getPage))
+      return -EINVAL; /*This file doesn't support mmap!*/
+   if(address & 0xfff)
+      return -EINVAL; /*Invaild address.*/
    VirtualMemoryArea *new = kmalloc(sizeof(*new));
    if(!new) /*Alloc the VirtualMemoryArea.*/
       return -ENOMEM;
    new->start = start;
    new->length = len;
-   new->file = vfsGetFile(file);
+   if(flags & MAP_ANONYMOUS)
+      new->file = 0;
+   else
+      new->file = vfsGetFile(file);
    new->offset = offset; /*Set the fields.*/
+   new->prot = prot;
    if(vma)
    {
       new->next = vma->next;
@@ -452,6 +473,7 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
          nvma->file = 0;
       else
          nvma->file = vfsGetFile(vma->file);
+      nvma->prot = vma->prot;
       nvma->start = vma->start;
       nvma->length = vma->length;
       nvma->next = 0;
@@ -552,10 +574,9 @@ int taskExitMemory(TaskMemory *old)
 
 int doPageFault(IRQRegisters *reg)
 {
-   u64 address,pos,base;
+   u64 address,pos,base = 0;
    VirtualMemoryArea *vma;
    Task *current = getCurrentTask();
-   int retval;
    void *pml4e,*pdpte,*pde,*pte;
    void *entry,*data;
    PhysicsPage *entryPage,*dataPage;
@@ -604,25 +625,45 @@ int doPageFault(IRQRegisters *reg)
    if(reg->irq & 1 /*Exist?*/)
       goto cow; /*Copy On Write.*/
 
+   if(!file)
+      goto nofile;
+
+   dataPage = 
+      (*file->dentry->inode->cache.operation->getPage)(
+          file->dentry->inode,base); /*Get the data page.*/
+   if(!dataPage)
+      goto nofile;
+   if(vma->prot & PROT_WRITE)
+      goto copyfile;
+   setPTEEntry(pte,address,va2pa(getPhysicsPageAddress(dataPage)));
+   setPTEEntryAttribute(pte,address,0); /*Read Only.*/
+
+   pagingFlushTLB();
+   return 0;
+copyfile:
+   entryPage = allocPages(0); /*Alloc a new page.*/
+   if(!entryPage)
+      return -ENOMEM;
+   entry = getPhysicsPageAddress(entryPage);
+   memcpy(entry,getPhysicsPageAddress(dataPage),0x1000);
+   setPTEEntry(pte,address,va2pa(entry)); /*And copy data to the new page.*/
+   (*file->dentry->inode->cache.operation->putPage)(dataPage);
+
+   pagingFlushTLB(); /*Flush TLBs.*/
+   return 0;
+nofile:
    dataPage = allocPages(0);
    if(!dataPage)
       return -ENOMEM;
    data = getPhysicsPageAddress(dataPage);
-   retval = -EIO;
-   if(file)
-      if((*file->operation->read)(file,
-         data + (pos < 0 ? -pos : 0),0x1000 - ((pos < 0) ? -pos : 0),&base) < 0)
-      goto failed; /*Read the data!*/
-   if(!file)
-      memset(data,0,0x1000); /*Set to zero!*/
+   memset(data,0,0x1000); /*Set to zero.*/
    setPTEEntry(pte,address,va2pa(data));
-
-   pagingFlushTLB();
+   
+   pagingFlushTLB(); /*Flush TLBs.*/
    return 0;
-failed:
-   freePages(dataPage,0);
-   return retval;
 cow:;
+   if(!(vma->prot & PROT_WRITE))
+      return -EFAULT; /*Can't write!*/
    entry = getPTEEntry(pte,address);
 
    entryPage = getPhysicsPage(entry);

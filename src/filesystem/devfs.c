@@ -1,7 +1,7 @@
 #include <core/const.h>
 #include <core/list.h>
 #include <filesystem/virtual.h>
-#include <filesystem/block.h>
+#include <block/block.h>
 #include <memory/kmalloc.h>
 #include <lib/string.h>
 
@@ -39,6 +39,12 @@ static VFSINodeOperation devfsINodeOperation = {
    .mkdir = 0,
    .unlink = 0,
    .open = &devfsOpen
+};
+
+static PageCacheOperation devfsPageCacheOperation = {
+   .getPage = 0,
+   .putPage = 0,
+   .flushPage = 0 /*No support for mmap!*/
 };
 
 static DevfsINode devfsRoot;
@@ -108,6 +114,7 @@ static int devfsLookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
       {
          result->inode->part = next->part; 
          result->inode->operation = &devfsINodeOperation;
+         result->inode->cache.operation = &devfsPageCacheOperation;
          result->inode->data = next;
          result->inode->mode = next->mode;
          return 0;

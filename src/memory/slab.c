@@ -175,7 +175,7 @@ static int flushLocalCache(SlabCache *cache)
 
    for(int i = 0;i < batchCount;++i)
    {
-      void *obj = objects[i];
+      void *obj = objects[localCache->limit - i - 1];
       page = getPhysicsPage(obj); /*Get page index.*/
       slab = (Slab *)page->list.prev; /*Get slab,see also allocSlabForSlabCache.*/
       objnr = (obj - slab->memory) / cache->objSize;

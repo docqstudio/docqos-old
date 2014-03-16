@@ -3,6 +3,7 @@
 #include <memory/memory.h>
 #include <video/console.h>
 #include <cpu/spinlock.h>
+#include <block/pagecache.h>
 
 #define MAX_ORDER 0xB
 
@@ -10,6 +11,7 @@ extern void *endAddressOfKernel; /*See also ldscripts/kernel.lds.*/
                                  /*It will init in start/cstart.c.*/
 static PhysicsPage *memoryMap;
 static u64 physicsPageCount;
+static u64 freePhysicsPageCount;
 
 static ListHead buddyFreeList[MAX_ORDER];
 /*MAX_ORDER is 11,so we can get 2^(MAX_ORDER - 1)*PAGE_SIZE = 4MB memory once at most.*/
@@ -65,6 +67,7 @@ int initBuddySystem(void)
    printk("The last physics page address: 0x%p,the size of physics pages: %ldKB.\n",
       endAddressOfKernel,
       physicsPageCount * sizeof(PhysicsPage)/1024 + 1);
+   freePhysicsPageCount = 0;
 
    printk("Initialize Buddy System successfully!\n");
    return 0;
@@ -72,6 +75,7 @@ int initBuddySystem(void)
 
 int freePages(PhysicsPage *page,unsigned int order)
 {
+   int retval;
    u64 pageIndex = (u64)(page - memoryMap);
    u64 buddyIndex = 0;
    PhysicsPage *targetPage = 0;
@@ -80,8 +84,11 @@ int freePages(PhysicsPage *page,unsigned int order)
       return -EINVAL; /*Error!*/
    if(page->flags & PageReserved)
       return -EPERM;
-   if(atomicAddRet(&page->count,-1) != 0)
-      return 1;
+   if(page->flags & PagePageCache)
+      return (*page->cache->operation->putPage)(page);
+   if((retval = atomicAddRet(&page->count,-1)) != 0)
+      return retval;
+   freePhysicsPageCount += (1 << order);
    lockSpinLock(&buddySpinLock[order]);
    while(order < MAX_ORDER - 1)
    {
@@ -103,8 +110,7 @@ int freePages(PhysicsPage *page,unsigned int order)
    atomicSet(&targetPage->count,0);
    listAddTail(&targetPage->list,&buddyFreeList[order]);
    unlockSpinLock(&buddySpinLock[order]);
-   
-   return 0;
+   return retval;
 }
 
 PhysicsPage *allocPages(unsigned int order)
@@ -136,6 +142,7 @@ PhysicsPage *allocPages(unsigned int order)
             buddy->flags |= PageData;
             buddy->data = currentOrder;
          } /*Split the page.*/
+         freePhysicsPageCount -= (1 << order);
          return page;
       }
       unlockSpinLock(&buddySpinLock[currentOrder]);
@@ -174,6 +181,7 @@ PhysicsPage *allocAlignedPages(unsigned int order)
             buddy->flags |= PageData;
             buddy->data = currentOrder;
          } /*Split the page.*/
+         freePhysicsPageCount -= (1 << order);
          return page;
       }
       unlockSpinLock(&buddySpinLock[currentOrder]);
@@ -212,6 +220,7 @@ PhysicsPage *allocDMAPages(unsigned int order,unsigned int max)
             buddy->flags |= PageData;
             buddy->data = currentOrder;
          } /*Split the page.*/
+         freePhysicsPageCount -= (1 << order);
          return page;
       }
       unlockSpinLock(&buddySpinLock[currentOrder]);

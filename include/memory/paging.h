@@ -32,9 +32,20 @@ typedef struct VirtualMemoryArea {
    u64 offset;
    u64 start;
    u64 length;
+   int prot;
 } VirtualMemoryArea;
 
-int doMMap(VFSFile *file,u64 offset,pointer address,u64 len);
+#define MAP_FIXED     0x01
+#define MAP_ANONYMOUS 0x02
+#define MAP_PRIVATE   0x04
+
+#define PROT_NONE  0x00
+#define PROT_READ  0x01
+#define PROT_WRITE 0x02
+#define PROT_EXEC  0x04
+
+int doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
+          int prot,int flags);
 
 int initPaging(void);
 

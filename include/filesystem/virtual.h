@@ -5,6 +5,7 @@
 #include <cpu/spinlock.h>
 #include <cpu/atomic.h>
 #include <task/semaphore.h>
+#include <block/pagecache.h>
 
 typedef struct BlockDevicePart BlockDevicePart;
 typedef struct VFSINode VFSINode;
@@ -77,6 +78,8 @@ typedef struct VFSINode{
    void *data;
    VFSINodeOperation *operation;
    Semaphore semaphore;
+
+   PageCache cache;
 } VFSINode;
 
 typedef struct FileSystemMount{
