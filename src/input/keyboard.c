@@ -114,21 +114,16 @@ static int keyboardTestIn(void)
    return 0;
 }
 
-static u8 keyboardCallback(u8 data,u8 *pshift,u8 *pctrl)
+static u8 keyboardCallback(u8 data,KeyboardState *state)
 {
-   static u8 caps = 0,num = 1,scroll = 0;
-   static u8 shift = 0,ctrl = 0;
-   static u8 e0 = 0;
-   *pshift = shift;
-   *pctrl = ctrl;
    u8 keypad = 0;
-   if(data == 0xe0 && (e0 = 1))
+   if(data == 0xe0 && (state->data = 1))
       return 0;
 
    u8 make = !(data & 0x80);
    data &= 0x7f;
 
-   if(e0 && ((e0 = 0) || 1))
+   if(state->data && ((state->data = 0) || 1))
       switch(data)
       {
       case 0x48:
@@ -140,39 +135,39 @@ static u8 keyboardCallback(u8 data,u8 *pshift,u8 *pctrl)
       case 0x4b:
          return KEY_LEFT;
       default:
-         break;
+         return 0; /*Ingore.*/
       }
 
    switch(data)
    {
    case 0x2a:
    case 0x36: /*Right-Shift and Left-Shift.*/
-      *pshift = shift = !!make;
+      state->shift = !!make;
       data = 0;
       break;
    case 0x1d: /*Right-Ctrl and Left-Ctrl.*/
-      *pctrl = ctrl = !!make;
+      state->ctrl = !!make;
       data = 0;
       break;
    case 0x3a: /*CapsLock.*/
       if(!make)
          break;
-      caps = !caps;
-      keyboardSetLED((scroll << 0) | (num << 1) | (caps << 2));
+      state->caps = !state->caps;
+      keyboardSetLED((state->scroll << 0) | (state->num << 1) | (state->caps << 2));
       data = 0;
       break;
    case 0x45: /*NumLock.*/
       if(!make)
          break;
-      num = !num;
-      keyboardSetLED((scroll << 0) | (num << 1) | (caps << 2));
+      state->num = !state->num;
+      keyboardSetLED((state->scroll << 0) | (state->num << 1) | (state->caps << 2));
       data = 0;
       break;
    case 0x46: /*ScrollLock.*/
       if(!make)
          break;
-      scroll = !scroll;
-      keyboardSetLED((scroll << 0) | (num << 1) | (caps << 2));
+      state->scroll = !state->scroll;
+      keyboardSetLED((state->scroll << 0) | (state->num << 1) | (state->caps << 2));
       data = 0;
       break;
    default:
@@ -183,17 +178,17 @@ static u8 keyboardCallback(u8 data,u8 *pshift,u8 *pctrl)
          break; 
       if(0x47 <= data && data <= 0x53)
          keypad = 1; /*Keypad.*/
-      if(shift)
+      if(state->shift)
          data = keyboardMapShift[data];
       else
          data = keyboardMap[data];
       if(!data)
          break;
       if(('0' <= data) && (data <= '9') && keypad)
-         if(!num) 
+         if(!state->num) 
             break;
       if(('a' <= data) && (data <= 'z'))
-         if(shift ^ caps)
+         if(state->shift ^ state->caps)
             data -= 'a' - 'A'; /*To the supper case.*/
       return data;
    }

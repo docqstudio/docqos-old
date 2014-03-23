@@ -195,7 +195,7 @@ static int ttyUpdate(TTYScreen *screen)
 
 static int ttyTaskFunction(void *data)
 {
-   u8 ctrl = 0,shift = 0;
+   KeyboardState state = {.caps = 0,.num = 1,.scroll = 0,.shift = 0,.ctrl = 0};
    u64 rflags;
    unsigned long long int ticks = 0; 
               /*The ticks when we did the lastest refreshing.*/
@@ -254,29 +254,29 @@ static int ttyTaskFunction(void *data)
                ticks = getTicks();
             break;
          case 3: /*Keyboard press.*/
-            queue->data = (*queue->callback)(queue->data,&shift,&ctrl);
+            queue->data = (*queue->callback)(queue->data,&state);
             if(!queue->data)
                break;
             switch(queue->data)
             {
             case KEY_UP:
-               offsety -= ctrl ? 8 : 1;
+               offsety -= state.shift ? 8 : 1;
                break;
             case KEY_DOWN:
-               offsety += ctrl ? 8 : 1;
+               offsety += state.shift ? 8 : 1;
                break;
             case KEY_LEFT:
-               offsetx -= ctrl ? 8 : 1;
+               offsetx -= state.shift ? 8 : 1;
                break;
             case KEY_RIGHT:
-               offsetx += ctrl ? 8 : 1;
+               offsetx += state.shift ? 8 : 1;
                break;
             default:
                break;
             }
             if(queue->data >= 0x80)
                break;
-            if(ctrl && !position && 
+            if(state.ctrl && !position && 
                   (queue->data == 'd' || queue->data == 'D'))
             { /*Ctrl + D , EOF!*/
                *reader->s = 0;
@@ -285,7 +285,7 @@ static int ttyTaskFunction(void *data)
                reader = 0;
                break;
             }
-            if(ctrl)
+            if(state.ctrl)
                break;
             if(!reader || position != 0 || queue->data != '\b')
                ttyWriteScreen(&ttyMainScreen,(const char []){queue->data,'\0'},1),

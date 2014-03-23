@@ -1,7 +1,18 @@
 #pragma once
+#include <core/const.h>
+
+typedef struct KeyboardState
+{
+   u8 caps:1;
+   u8 num:1;
+   u8 scroll:1;
+   u8 shift:1;
+   u8 ctrl:1;
+   u8 data:1;
+} KeyboardState;
 
 typedef struct VFSFile VFSFile;
-typedef u8 (KeyboardCallback)(u8 data,u8 *shift,u8 *ctrl);
+typedef u8 (KeyboardCallback)(u8 data,KeyboardState *state);
 
 #define KEY_UP    0x81
 #define KEY_DOWN  0x82
