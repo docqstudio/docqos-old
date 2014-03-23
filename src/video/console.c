@@ -17,8 +17,10 @@ int printkInColor(u8 red,u8 green,u8 blue,const char *string, ...)
    varArgsEnd(list);
    
    frameBufferWriteStringInColor(red,green,blue,buf,0,1);
+#if defined(CONFIG_DEBUG)
    writeSerialPort(buf,0);
       /*Write to the screen and the first serial port.*/
+#endif
    return ret;
 }
 
@@ -32,10 +34,13 @@ int printk(const char *string, ...)
    varArgsEnd(list);
 
    frameBufferWriteString(buf);
+#if defined(CONFIG_DEBUG)
    writeSerialPort(buf,0);
+#endif
    return ret;
 }
 
+#if defined(CONFIG_DEBUG)
 int printl(const char *string,...)
 {
    char buf[256];
@@ -48,6 +53,7 @@ int printl(const char *string,...)
    writeSerialPort(buf,0); /*Write to the first serial port.*/
    return ret;
 }
+#endif 
 
 char *vsprintk(char *buf,const char *string,VarArgsList list) 
 /*Now it only supports %d,%x,%s.*/

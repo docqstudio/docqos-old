@@ -9,7 +9,7 @@ int downSemaphore(Semaphore *sem)
    if(!current)
       return 0; /*Nothing to do.*/
    {
-      if(atomicAddRet(&sem->count,-1) >= 0)
+      if(likely(atomicAddRet(&sem->count,-1) >= 0))
          return 0; /*If unlock,just lock it and return.*/
       WaitQueue wait;
       initWaitQueue(&wait,current);

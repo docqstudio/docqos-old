@@ -4,13 +4,19 @@
 #include <memory/memory.h>
 #include <memory/buddy.h>
 #include <memory/kmalloc.h>
+#include <memory/vmalloc.h>
 #include <lib/string.h>
 #include <filesystem/virtual.h>
 #include <task/semaphore.h>
 #include <interrupt/interrupt.h>
 #include <video/console.h>
 
-#define MIN_MAPPING (1024ul*1024*1024*4) /*4GB.*/
+#define MIN_MAPPING (1024ul * 1024 * 1024 * 4) /*4GB.*/
+
+#define VMALLOC_START (1024ul * 1024 * 1024 *  768) /*768GB.*/
+#define MMAP_START    (1024ul * 1024 * 1024 *    1) /*1GB.*/
+#define VMALLOC_END   (1024ul * 1024 * 1024 * 1024) /*768GB.*/
+#define MMAP_END      PAGE_OFFSET
 
 extern void *endAddressOfKernel;
 TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags);
@@ -21,6 +27,9 @@ static u64 *kernelPDPTEDir;
 static u64 *kernelPDEDir;
 
 static u64 pml4eCount;
+
+static VirtualMemoryArea *vmallocVirtualMemoryAreas = 0;
+static Semaphore vmallocSemaphore;
 
 extern int calcMemorySize(void);
 
@@ -105,6 +114,76 @@ static int setPTEEntry(void *__pte,pointer address,pointer p)
    return 0;
 }
 
+static void *allocKernelPDE(void *__pdpte,pointer address)
+{
+   u64 *pdpte = (u64 *)__pdpte;
+   u64 nr = (address >> 30) & 0x1ff; /*30 - 38 bits.*/
+   u64 data = pdpte[nr];
+   if(data & 0x1) /*Exists?*/
+      return pa2va(data & ~(0x1000 - 1));
+   PhysicsPage *page = allocPages(0);
+   if(!page)
+      return 0;
+   u64 *ret = (u64 *)getPhysicsPageAddress(page);
+   memset(ret,0,0x1000); /*Zero.*/
+   pdpte[nr] = ((u64)va2pa(ret)) + 0x003; /*P,R/W.*/
+
+   return ret;
+}
+
+static void *allocKernelPTE(void *__pde,pointer address)
+{
+   u64 *pde = (u64 *)__pde;
+   u64 nr = (address >> 21) & 0x1ff; /*21 - 29 bits.*/
+   u64 data = pde[nr];
+   if(data & 0x1) /*Exists?*/
+      return pa2va(data & ~(0x1000 - 1));
+   PhysicsPage *page = allocPages(0);
+   if(!page)
+      return 0;
+   u64 *ret = (u64 *)getPhysicsPageAddress(page);
+   memset(ret,0,0x1000); /*Zero.*/
+   pde[nr] = ((u64)va2pa(ret)) + 0x003; /*P,R/W and U/S.*/
+
+   referencePage(getPhysicsPage(pde));
+   return ret;
+}
+
+static int setKernelPTEEntry(void *__pte,pointer address,pointer p)
+{
+   u64 *pte = (u64 *)__pte;
+   u64 nr = (address >> 12) & 0x1ff;
+   u64 data = pte[nr];
+   
+   pte[nr] = ((u64)p) + 0x003; /*P,R/W and U/S.*/
+
+   if(!(data & 1))
+      referencePage(getPhysicsPage(pte));
+      /*Add the reference count.*/
+   return 0;
+}
+
+static int clearKernelPTEEntry(void *__pdpte,void *__pde,void *__pte,pointer address)
+{
+   u64 *pdpte = __pdpte;
+   u64 *pde = __pde;
+   u64 *pte = __pte;
+   u64 nr0 = (address >>= 12) & 0x1ff;
+   u64 nr1 = (address >>= 9) & 0x1ff;
+   u64 nr2 = (address >>= 9) & 0x1ff;
+
+   if(!(pte[nr0] & 0x1))
+      return -ENOENT;
+   pte[nr0] = 0;  /*Clear the PTE Entry.*/
+   if(dereferencePage(getPhysicsPage(pte),0) > 0)
+      return 0;
+   pde[nr1] = 0; /*Clear the PDE Entry.*/
+   if(dereferencePage(getPhysicsPage(pde),0) > 0)
+      return 0;
+   pdpte[nr2] = 0; /*Clear the PDPTE Entry.*/
+      /*We don't dereference pdpte.*/
+   return 0;
+}
 static void *getPDPTE(void *__pml4e,pointer address)
 {
    u64 *pml4e = __pml4e;
@@ -188,11 +267,10 @@ static int setPTEEntryAttribute(void *__pte,pointer address,u8 write)
 }
 
 static VirtualMemoryArea *lookForVirtualMemoryArea(
-                          TaskMemory *mm,u64 start)
+                          VirtualMemoryArea *vma,u64 start)
 { /*This function looks for the last VirtulMemoryArea that is before 'start'.*/
   /*This function will return 0 when 1. mm->vm == 0 .*/
   /*                                 2. mm->vm->start + mm->vm->length > start .*/
-   VirtualMemoryArea *vma = mm->vm;
    VirtualMemoryArea *prev = 0;
    while(vma)
    {
@@ -204,23 +282,22 @@ static VirtualMemoryArea *lookForVirtualMemoryArea(
    return prev;
 }
 
-static u64 lookForFreeVirtualMemoryArea(
-              TaskMemory *mm,u64 start,u64 length,VirtualMemoryArea **v)
+static u64 lookForFreeVirtualMemoryArea(u64 type,u64 end,
+              VirtualMemoryArea *vma,u64 start,u64 length,VirtualMemoryArea **v)
 {
    if(length > PAGE_OFFSET)
       return -ENOMEM; /*Too large!*/
-   VirtualMemoryArea *vma;
-   if(start && start + length <= PAGE_OFFSET)
+   if(start && start + length <= PAGE_OFFSET) /*For vmalloc,start == 0.*/
    {
-      vma = lookForVirtualMemoryArea(mm,start);
+      vma = lookForVirtualMemoryArea(vma,start);
       if(!vma || !vma->next)
          goto found;
       if(vma->next->start >= start + length)
          goto found;
    }
-   start = 1024 * 1024 * 1024; /*Look from 1GB.*/
-   for(vma = lookForVirtualMemoryArea(mm,start);
-          start + length <= PAGE_OFFSET;vma = vma->next)
+   start = type; /*Look from 1GB.*/
+   for(vma = lookForVirtualMemoryArea(vma,start);
+          start + length <= end;vma = vma->next)
    {
       if(!vma || !vma->next)
          goto found;
@@ -357,6 +434,8 @@ int initPaging(void)
 #undef ALIGN
 
    asm volatile("movq %%rax,%%cr3"::"a" (va2pa(kernelPML4EDir)):"memory");
+
+   initSemaphore(&vmallocSemaphore);
    return 0;
 }
 
@@ -367,7 +446,8 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
    Task *current = getCurrentTask();
    TaskMemory *mm = current->mm;
    VirtualMemoryArea *vma = 0;
-   u64 start = lookForFreeVirtualMemoryArea(mm,address,len,&vma);
+   u64 start = lookForFreeVirtualMemoryArea(
+        MMAP_START,MMAP_END,mm->vm,address,len,&vma);
 
    if((s64)start < 0)
       return (s64)start;
@@ -583,11 +663,12 @@ int doPageFault(IRQRegisters *reg)
 
    asm volatile("movq %%cr2,%%rax":"=a"(address));
                       /*Get the address which produces this exception.*/
-   if(!current || !current->mm) /*Kernel Task!*/
-      return -ENOSYS;
+   if(!current)
+      return -EFAULT;
    if(address > PAGE_OFFSET)
       return -EFAULT;
-   vma = lookForVirtualMemoryArea(current->mm,address);
+      
+   vma = lookForVirtualMemoryArea(current->mm->vm,address);
                  /*Look for the virtual memory area!*/
    if(!vma && current->mm->vm)
       vma = current->mm->vm;
@@ -681,4 +762,111 @@ done:
    setPTEEntryAttribute(pte,address,1 /*Read/Write.*/);
    pagingFlushTLB();
    return 0;
+}
+
+void *vmalloc(u64 size)
+{
+   size = (size + 0xfff) & ~0xfff;
+   if(!size)
+      return 0;
+   downSemaphore(&vmallocSemaphore);
+   VirtualMemoryArea *vma,**previous;
+   u64 start = lookForFreeVirtualMemoryArea(
+        VMALLOC_START,VMALLOC_END,vmallocVirtualMemoryAreas,
+        0,size,&vma); /*Look for the free area.*/
+   void *obj = 0;
+   u64 address,end;
+   if((s64)start < 0)
+      goto out;
+   VirtualMemoryArea *area = kmalloc(sizeof(area));
+   if(!area)
+      goto out;
+   area->start = start;
+   area->length = size;
+   previous = vma ? &vma->next : &vmallocVirtualMemoryAreas;
+
+   area->next = *previous;
+   *previous = area;
+   address = area->start;
+   end = address + area->length;
+
+   u64 offset0 = address & (0x1ff << 30);
+   u64 offset1 = address & (0x1ff << 21);
+   u64 offset2 = address & (0x1ff << 12);
+
+   do{
+      void *pde = allocKernelPDE(kernelPDPTEDir,offset0);
+      if(!pde)
+         goto out;
+      do{
+         void *pte = allocKernelPTE(pde,offset1);
+         if(!pte)
+            goto out;
+         do{
+            void *page = allocPages(0);
+            if(!page)
+               goto out;
+            page = getPhysicsPageAddress(page);
+            setKernelPTEEntry(pte,offset2,va2pa(page));
+                    /*Set the pte entry..*/
+         }while(offset2 += 1ul << 12,offset0 + offset1 + offset2 < end);
+      }while(offset1 += 1ul << 21,offset1 + offset0 < end);
+   }while(offset0 += 1ul << 30,offset0 < end);
+   obj = (void *)address;
+
+out:
+   upSemaphore(&vmallocSemaphore);
+   pagingFlushTLB(); /*Flush the tlbs.*/
+   return obj;
+}
+
+int vfree(void *obj)
+{
+   u64 address = (u64)obj;
+   downSemaphore(&vmallocSemaphore);
+
+   int retval = -EINVAL;
+   VirtualMemoryArea *vma = lookForVirtualMemoryArea(
+              vmallocVirtualMemoryAreas,address);
+                /*Look for the area of obj.*/
+   if(!vma && vmallocVirtualMemoryAreas)
+      vma =   vmallocVirtualMemoryAreas;
+   else if(!vma || !vma->next)
+      goto out;
+   else
+      vma = vma->next;
+
+   if(address != vma->start)
+      goto out;
+
+   u64 offset0 = address & (0x1fful << 30);
+   u64 offset1 = address & (0x1fful << 21);
+   u64 offset2 = address & (0x1fful << 12);
+
+   u64 end = address + vma->length;
+   do{
+      void *pde = getPDE(kernelPDPTEDir,offset0);
+      if(!pde)
+         continue;
+      do{
+         void *pte = getPTE(pde,offset1);
+         if(!pte)
+            continue;
+         do{
+            void *entry = getPTEEntry(pte,offset2);
+            if(!entry)
+               continue;
+            freePages(getPhysicsPage(entry),0);
+            clearKernelPTEEntry(kernelPDPTEDir,pde,pte,offset0 + offset1 + offset2);
+                  /*Clear the entry.*/
+         }while(offset2 += 1ul << 12,offset0 + offset1 + offset2 < end);
+      }while(offset1 += 1ul << 21,offset0 + offset1 < end);
+   }while(offset0 += 1ul << 30,offset0 < end);
+
+   retval = 0;
+out:
+   upSemaphore(&vmallocSemaphore);
+
+   pagingFlushTLB(); /*Flush the TLBs.*/
+   return retval;
 }

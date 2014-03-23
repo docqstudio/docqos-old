@@ -156,17 +156,17 @@ out:
 
 int shell(void)
 {
-   char cwd[64] = "\xffsff0000losthost \xffs0055ff/ $ ";
+   char cwd[64] = "\033[01;32mlocalhost \033[01;34m/ $";
    volatile char cmd[35];
    int i;
    for(;;)
-   {    /*Print "losthost $(getcwd) # ".*/
-      i = getcwd(cwd + 25,sizeof(cwd) - 25 - 4);
+   {    /*Print "localhost $(getcwd) # ".*/
+      i = getcwd(cwd + 26,sizeof(cwd) - 26 - 4);
                           /*Get the current working dir.*/
-      cwd[25 + i] = ' ';
-      cwd[26 + i] = '#';
-      cwd[27 + i] = ' ';
-      cwd[28 + i] = '\0';
+      cwd[26 + i] = ' ';
+      cwd[27 + i] = '#';
+      cwd[28 + i] = ' ';
+      cwd[29 + i] = '\0';
       write(stdout,cwd,0);
       i = read(stdin,(void *)cmd,sizeof(cmd) - 3);
       

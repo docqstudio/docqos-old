@@ -197,4 +197,3 @@ inline int isErrorPointer(void *pointer)
 {
    return ((u64)pointer) > (u64)-1000;
 }
-#define CONFIG_DEBUG

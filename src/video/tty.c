@@ -22,12 +22,40 @@ typedef struct TTYTaskQueue{
    ListHead list;
 } TTYTaskQueue;
 
+typedef struct TTYCharacter
+{
+   unsigned char character:7;
+   unsigned char change:1;
+   unsigned char red;
+   unsigned char green;
+   unsigned char blue; /*Some information of the character.*/
+} TTYCharacter;
+
+typedef struct TTYScreen
+{
+   unsigned int x; /*The x position of the current character.*/
+   unsigned int y; /*The y position of the current character.*/
+   unsigned int height; /*The height in pixels.*/
+   unsigned int width; /*The width in pixels.*/
+   unsigned int lines; /*The lines of the screen.*/
+   unsigned int columns; /*The columns of the screen.*/
+   unsigned int scroll; 
+     /*How many lines should we scroll when we do the refreshing.*/
+   unsigned int line; /*The current line.*/
+   unsigned int fb; /*......*/
+   struct {unsigned int height;unsigned int width;} font;
+                   /*The font information.*/
+   TTYCharacter new[768 / 18][1024 / 10]; /*The characters.*/
+   unsigned char dirty[768 / 18]; /*Is the line dirty?*/
+} TTYScreen;
+
 #define TTY_REFRESH_TICKS         (TIMER_HZ / 1)
 #define TTY_REFRESH_LASTEST_TICKS (TIMER_HZ / 3)
 
 static Task *ttyTask = 0;
 static SpinLock ttyTaskQueueLock;
 static ListHead ttyTaskQueue;
+static TTYScreen ttyMainScreen;
 
 static VFSFileOperation ttyOperation = {
    .read = (void *)&ttyRead,
@@ -36,19 +64,167 @@ static VFSFileOperation ttyOperation = {
    .lseek = 0
 };
 
+
+static int ttyWriteScreen(TTYScreen *screen,const char *data,int length)
+{
+   char c;
+   unsigned int red = 0xff,green = 0xff,blue = 0xff;
+   for(int i = 0;i < length;++i)
+   {
+      switch((c = *data++)) 
+      { 
+      case '\t':  /*Now ingore it.*/
+         break; 
+      case '\b': /*Back Space.*/
+         if(screen->x == 0)
+         { /*To the previous line.*/
+            if(screen->y == screen->line)
+               break;
+            if(!screen->y)
+               screen->y = screen->lines;
+            --screen->y;
+            --screen->fb;
+            screen->x = screen->columns;
+         }
+         screen->new[screen->y][--screen->x].character = ' ';
+                   /*Set to a space.*/
+         screen->new[screen->y][screen->x].change = 1;
+         screen->dirty[screen->y] = 1; /*The line is dirty!*/
+         break; 
+      case '\n': 
+         screen->x = screen->columns; 
+         break;
+      case '\033':
+         if(data[0] == '[' && data[3] == ';' && data[6] == 'm')
+            if(data[1] == '0' && data[2] == '1' && data[4] == '3')
+            {
+               switch(data[5])
+               {
+               case '2': /*Red.*/
+                  red = 0xff;
+                  green = blue = 0x00;
+                  data += 7;
+                  length -= 7;
+                  break;
+               case '4': /*Blue.*/
+                  red = green = 0x00;
+                  blue = 0xff;
+                  data += 7;
+                  length -= 7;
+                  break;
+               default:
+                  break;
+               }
+            }
+         break;
+      default: 
+         if(c > 0x7e || c < 0x20) 
+            c = ' '; 
+         TTYCharacter *character = &screen->new[screen->y][screen->x++];
+         character->character = c;
+         character->red = red;
+         character->blue = blue;
+         character->green = green;
+         screen->dirty[screen->y] = 1;
+         screen->new[screen->y][screen->x].character = '\0';
+                      /*The next character is '\0'.*/
+         break; 
+      } 
+      if(screen->x == screen->columns) 
+      { 
+         screen->x = 0; 
+         ++screen->y; 
+         if(screen->y == screen->lines) 
+            screen->y = 0; 
+         if(screen->y == screen->line) 
+         {  /*We must scroll.*/
+            ++screen->line; 
+            if(screen->line == screen->lines) 
+               screen->line = 0; 
+            if(screen->scroll < screen->lines) 
+               ++screen->scroll; 
+         }else 
+            ++screen->fb; 
+      } 
+   }
+   if(!screen->new[screen->y][screen->x].change)
+      screen->new[screen->y][screen->x].character = '\0';
+   else
+      screen->new[screen->y][screen->x].change = 0;
+   return 0;
+}
+
+static int ttyUpdate(TTYScreen *screen)
+{
+   unsigned int line = -1;
+   frameBufferScroll(screen->scroll);
+        /*Scroll the screen.*/
+
+   for(int i = 0;i < screen->lines;++i)
+   {
+      if(!screen->dirty[i])
+         continue; /*The line isn't dirty.*/
+      unsigned int height = i - screen->y + screen->fb;
+      if(height >= screen->lines)
+         height -= screen->lines;
+      if(line == -1)
+         line = height;
+      else
+         line = -2;
+      height *= screen->font.height;
+      for(int j = 0;j < screen->columns;++j) 
+      { 
+         TTYCharacter *character = &screen->new[i][j];
+         if(!character->character) 
+            break; 
+         frameBufferDrawChar(0,0,0,character->red,character->green,character->blue, 
+              j * screen->font.width,height,screen->new[i][j].character); 
+              /*Draw the character to the screen.*/
+      }
+      screen->dirty[i] = 0; /*Now the line isn't dirty.*/
+   }
+   if(line != -2 && line != -1 && !screen->scroll)
+      frameBufferRefreshLine(line,1); /*Only refresh one line.*/
+   else
+      frameBufferRefreshLine(0,0); /*Refresh all!*/
+   
+   screen->scroll = 0;
+
+   return 0;
+}
+
 static int ttyTaskFunction(void *data)
 {
-   u8 ctrl,shift;
+   u8 ctrl = 0,shift = 0;
    u64 rflags;
    unsigned long long int ticks = 0; 
               /*The ticks when we did the lastest refreshing.*/
    unsigned long long int current = 0;
               /*The ticks now.*/
    int position = 0;
+   int offsetx = 0,offsety = 0;
    TTYTaskQueue *reader = 0;
+   void *layer;
 
    TTYTaskQueue *queue;
    ttyTask = getCurrentTask();
+   ttyTask->state = TaskStopping;
+   schedule(); /*Wait until receive the first request.*/
+
+   ttyMainScreen.fb = ttyMainScreen.line = ttyMainScreen.scroll = 0;
+   ttyMainScreen.x = ttyMainScreen.y = 0;
+   ttyMainScreen.width = 1024;
+   ttyMainScreen.height = 768;
+   ttyMainScreen.lines = 768 / 18;
+   ttyMainScreen.columns = 1024 / 10;
+   ttyMainScreen.font.height = 18;
+   ttyMainScreen.font.width = 10; /*Init some fields of the screen.*/
+   memset(ttyMainScreen.dirty,0,sizeof(ttyMainScreen.dirty));
+
+   frameBufferFillRect(0x00,0x00,0x00,0,0,1024,768); /*Clear the screen.*/
+   layer = createFrameBufferLayer(1024 / 2 - 45 / 2,768 / 2 - 45 / 2,45,45,0);
+               
+   frameBufferRefreshLine(0,0); /*Refresh all.*/
    for(;;)
    {
       lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
@@ -65,13 +241,11 @@ static int ttyTaskFunction(void *data)
                break;
             reader = queue;
             position = 0;
-            frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh.*/
             ticks = 0;
+            ttyUpdate(&ttyMainScreen);
             break;
          case 2: /*Write.*/
-            queue->data =
-               frameBufferWriteStringInColor(
-                     0xff,0xff,0xff,queue->s,queue->data,0);
+            ttyWriteScreen(&ttyMainScreen,queue->s,queue->data);
             if(queue->task) /*Is the task waiting?*/
                wakeUpTask(queue->task);
             else
@@ -82,6 +256,25 @@ static int ttyTaskFunction(void *data)
          case 3: /*Keyboard press.*/
             queue->data = (*queue->callback)(queue->data,&shift,&ctrl);
             if(!queue->data)
+               break;
+            switch(queue->data)
+            {
+            case KEY_UP:
+               offsety -= ctrl ? 8 : 1;
+               break;
+            case KEY_DOWN:
+               offsety += ctrl ? 8 : 1;
+               break;
+            case KEY_LEFT:
+               offsetx -= ctrl ? 8 : 1;
+               break;
+            case KEY_RIGHT:
+               offsetx += ctrl ? 8 : 1;
+               break;
+            default:
+               break;
+            }
+            if(queue->data >= 0x80)
                break;
             if(ctrl && !position && 
                   (queue->data == 'd' || queue->data == 'D'))
@@ -95,9 +288,8 @@ static int ttyTaskFunction(void *data)
             if(ctrl)
                break;
             if(!reader || position != 0 || queue->data != '\b')
-               frameBufferWriteStringInColor(
-                  0xff,0xff,0xff,(const char []){queue->data,'\0'},1,
-                  (ticks = 0) || (queue->data == '\n' ? !reader : 1)); /*We need refresh!*/
+               ttyWriteScreen(&ttyMainScreen,(const char []){queue->data,'\0'},1),
+                  (queue->data != '\n' || !reader ? ttyUpdate(&ttyMainScreen) : 0);
             if(!reader)
                break;
             if(queue->data == '\b' && position == 0)
@@ -120,12 +312,27 @@ static int ttyTaskFunction(void *data)
          current = getTicks();
          if(ticks && (current - ticks >= TTY_REFRESH_TICKS) &&
             ((ticks = 0) || 1))
-            frameBufferWriteStringInColor(0xff,0xff,0xff,"",0,1); /*Refresh,too!*/
+            ttyUpdate(&ttyMainScreen);
 
          lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
       }
-      ttyTask->state = TaskStopping;
+      if(!offsetx && !offsety)
+         ttyTask->state = TaskStopping;
       unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
+      if(offsetx || offsety)
+      {
+         int flag;
+         moveFrameBufferLayer(layer,offsetx,offsety,1,1);
+                     /*Move the layer.*/
+         offsetx = offsety = 0;
+         lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
+         if((flag = listEmpty(&ttyTaskQueue)))
+            ttyTask->state = TaskStopping; /*No new requests.*/
+         unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
+         if(!flag)
+            continue;
+      }
+      
       if(!ticks)
          schedule(); /*Wait the queue.*/
       else
@@ -186,7 +393,7 @@ int ttyWrite(VFSFile *file,const void *string,u64 size)
    queue->type = 2;
    queue->task = 0;/*No need to wait it.*/
    queue->s = s; /*The queue and the string will be free in the tty task0*/
-   queue->data = size;
+   queue->data = len;
    
    lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
    listAddTail(&queue->list,&ttyTaskQueue);

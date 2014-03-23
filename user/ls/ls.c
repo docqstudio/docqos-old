@@ -47,24 +47,24 @@ retry:
       case 1:
          if(first++){
             buffer[i + 1] = ' ';
-            buffer[i + 0] = 'f';
-            buffer[i - 1] = 'f';
-            buffer[i - 2] = '9';
-            buffer[i - 3] = '9';
-            buffer[i - 4] = '0';
+            buffer[i + 0] = 'm';
+            buffer[i - 1] = '4';
+            buffer[i - 2] = '3';
+            buffer[i - 3] = ';';
+            buffer[i - 4] = '1';
             buffer[i - 5] = '0';
-            buffer[i - 6] = 's';
-            buffer[i - 7] = '\xff';
+            buffer[i - 6] = '[';
+            buffer[i - 7] = '\033';
             write(stdout,&buffer[i - 7],0);
          }else{
-            buffer[i + 1] = 'f';
-            buffer[i + 0] = 'f';
-            buffer[i - 1] = '9';
-            buffer[i - 2] = '9'; /*Color Blue.*/
-            buffer[i - 3] = '0';
+            buffer[i + 1] = 'm';
+            buffer[i + 0] = '4';
+            buffer[i - 1] = '3';
+            buffer[i - 2] = ';'; /*Color Blue.*/
+            buffer[i - 3] = '1';
             buffer[i - 4] = '0';
-            buffer[i - 5] = 's';
-            buffer[i - 6] = '\xff';
+            buffer[i - 5] = '[';
+            buffer[i - 6] = '\033';
             write(stdout,&buffer[i - 6],0);
          }
          break;

@@ -2,10 +2,7 @@
 #include <core/list.h>
 #include <memory/slab.h>
 #include <memory/buddy.h>
-
-#ifdef CONFIG_DEBUG
 #include <video/console.h>
-#endif
 
 typedef struct MallocSize{
    u32 size;

@@ -118,14 +118,31 @@ static u8 keyboardCallback(u8 data,u8 *pshift,u8 *pctrl)
 {
    static u8 caps = 0,num = 1,scroll = 0;
    static u8 shift = 0,ctrl = 0;
+   static u8 e0 = 0;
    *pshift = shift;
    *pctrl = ctrl;
    u8 keypad = 0;
-   if(data == 0xe0)
+   if(data == 0xe0 && (e0 = 1))
       return 0;
 
    u8 make = !(data & 0x80);
    data &= 0x7f;
+
+   if(e0 && ((e0 = 0) || 1))
+      switch(data)
+      {
+      case 0x48:
+         return KEY_UP;
+      case 0x50:
+         return KEY_DOWN;
+      case 0x4d:
+         return KEY_RIGHT;
+      case 0x4b:
+         return KEY_LEFT;
+      default:
+         break;
+      }
+
    switch(data)
    {
    case 0x2a:
