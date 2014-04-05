@@ -158,6 +158,10 @@ _start32:
 .extern kmain
 
 _start64:
+   movq %cr0,%r8
+   andq $~(1 << 16),%r8 /*Clear WP bit.*/
+   movq %r8,%cr0
+
    movabs $stackTop,%rcx
    movq %rcx,%rsp
 

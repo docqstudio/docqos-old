@@ -29,6 +29,9 @@
 #define O_CLOEXEC   0x0010
 #define O_DIRECTORY 0x0020
 
+struct sigaction;
+#define TIOCSPGRP 5
+
 int fork(void);
 int exit(int n);
 int open(const char *path,int mode);
@@ -47,3 +50,6 @@ unsigned long lseek(int fd,signed long offset,int type);
 
 int dup(int fd);
 int dup2(int fd,int new);
+int kill(unsigned int pid,unsigned int sig);
+int sigaction(unsigned int sig,const struct sigaction *act,const void * unused);
+int ioctl(int fd,int cmd,void *data);

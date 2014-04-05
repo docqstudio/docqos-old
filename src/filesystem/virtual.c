@@ -635,6 +635,18 @@ int doGetDents64(int fd,void *data,u64 size)
    return ((void **)__data)[0] - data;
 }
 
+int doIOControl(int fd,int cmd,void *data)
+{
+   if(fd >= TASK_MAX_FILES || fd < 0)
+      return -EBADF;
+   VFSFile *file = getCurrentTask()->files->fd[fd];
+   if(!file)
+      return -EBADF;
+   if(!file->operation->ioctl)
+      return -ENOTTY;
+   return (*file->operation->ioctl)(file,cmd,data);
+}
+
 int doChdir(const char *dir)
 {
    VFSDentry *dentry = vfsLookUp(dir);

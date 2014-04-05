@@ -7,6 +7,7 @@
 #include <interrupt/localapic.h>
 #include <interrupt/ioapic.h>
 #include <task/task.h>
+#include <task/signal.h>
 
 typedef struct IRQInformation{
    IRQHandler handler;
@@ -49,9 +50,19 @@ int doIRQ(IRQRegisters *reg)
       break;
    }
    localApicSendEOI(); /*Send EOI to local APIC.*/
+
    enablePreemptionNoScheduling();
    if(current && current->needSchedule) /*Need schedule.*/
       preemptionSchedule();
+   if(current && handleSignalCheck(reg))
+   {
+      startInterrupt();
+      handleSignal(reg);
+      closeInterrupt();
+      
+      asm volatile("":::"memory");
+      current->needSchedule ? preemptionSchedule() : 0;
+   }
    return ret;
 }
 

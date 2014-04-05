@@ -51,10 +51,10 @@ inline int addToWaitQueueLocked(WaitQueue *wait,WaitQueue *head)
 inline int wakeUpLocked(WaitQueue *queue)
 {
    if(listEmpty(&queue->list))
-      return 0; /*Just do nothing if this list is empty.*/
+      return -ENOENT; /*Just do nothing if this list is empty.*/
    WaitQueue *wait = listEntry(queue->list.next,WaitQueue,list);
    Task *task = wait->task; /*Get the task.*/
-   return wakeUpTask(task); /*Wake up it!*/
+   return wakeUpTask(task,0); /*Wake up it!*/
 }
 
 inline int removeFromWaitQueueLocked(WaitQueue *wait)

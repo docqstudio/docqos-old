@@ -1,9 +1,11 @@
 #include <core/const.h>
 #include <interrupt/interrupt.h>
 #include <task/task.h>
+#include <task/signal.h>
 #include <filesystem/virtual.h>
 #include <acpi/power.h>
 #include <time/time.h>
+#include <cpu/io.h>
 
 #define REBOOT_MAGIC_CMD    0xacde147525474417ul
 #define POWEROFF_MAGIC_CMD  0x1234aeda78965421ul
@@ -27,6 +29,10 @@ static u64 systemGetCwd(IRQRegisters *reg);
 static u64 systemLSeek(IRQRegisters *reg);
 static u64 systemDup(IRQRegisters *reg);
 static u64 systemDup2(IRQRegisters *reg);
+static u64 systemIOControl(IRQRegisters *reg); /*For the ioctl system call in user space.*/
+static u64 systemKill(IRQRegisters *reg);
+static u64 systemSignalAction(IRQRegisters *reg);
+static u64 systemSignalReturn(IRQRegisters *reg);
 
 SystemCallHandler systemCallHandlers[] = {
    &systemExecve, /*0*/
@@ -45,7 +51,11 @@ SystemCallHandler systemCallHandlers[] = {
    &systemGetCwd,
    &systemLSeek,
    &systemDup, /*15*/
-   &systemDup2
+   &systemDup2,
+   &systemIOControl,
+   &systemKill,
+   &systemSignalAction,
+   &systemSignalReturn /*20*/
 };
 
 static u64 systemOpen(IRQRegisters *reg)
@@ -148,6 +158,24 @@ static u64 systemDup2(IRQRegisters *reg)
    return doDup2((int)reg->rbx,(int)reg->rcx);
 }
 
+static u64 systemIOControl(IRQRegisters *reg)
+{
+   return doIOControl((int)reg->rbx,(int)reg->rcx,(void *)reg->rdx);
+}
+static u64 systemKill(IRQRegisters *reg)
+{
+   return doKill((unsigned int)reg->rbx,(unsigned int)reg->rcx);
+}
+static u64 systemSignalAction(IRQRegisters *reg)
+{
+   return doSignalAction((unsigned int)reg->rbx,(void *)reg->rcx,
+                 (void *)reg->rdx);
+}
+static u64 systemSignalReturn(IRQRegisters *reg)
+{
+   return doSignalReturn(reg);
+}
+
 int doSystemCall(IRQRegisters *reg)
 {
    u64 ret = (u64)-ENOSYS;
@@ -156,5 +184,14 @@ int doSystemCall(IRQRegisters *reg)
    ret = (*systemCallHandlers[reg->rax])(reg);
 out:
    reg->rax = ret;
+   Task *current = getCurrentTask();
+   if(current->needSchedule) /*Need schedule.*/
+      preemptionSchedule();
+   if(handleSignalCheck(reg))
+   {
+      handleSignal(reg);
+      asm volatile("":::"memory");
+      current->needSchedule ? preemptionSchedule() : 0;
+   }
    return 0;
 }

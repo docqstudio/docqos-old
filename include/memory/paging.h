@@ -24,6 +24,7 @@ typedef struct TaskMemory{
 
    VirtualMemoryArea *vm;
    VFSFile *exec;
+   void *vkernel;
 } TaskMemory;
 
 typedef struct VirtualMemoryArea {
@@ -44,7 +45,7 @@ typedef struct VirtualMemoryArea {
 #define PROT_WRITE 0x02
 #define PROT_EXEC  0x04
 
-int doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
+void *doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
           int prot,int flags);
 
 int initPaging(void);

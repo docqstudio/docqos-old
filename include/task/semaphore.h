@@ -13,6 +13,7 @@ inline int initSemaphore(Semaphore *sem)
    __attribute__ ((always_inline));
 
 int downSemaphore(Semaphore *sem);
+int downSemaphoreInterruptible(Semaphore *sem);
 int upSemaphore(Semaphore *sem);
 
 inline int initSemaphore(Semaphore *sem)

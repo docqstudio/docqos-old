@@ -440,7 +440,7 @@ int initPaging(void)
 }
 
 
-int doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
+void *doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
               int prot,int flags)
 {
    Task *current = getCurrentTask();
@@ -449,29 +449,29 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
    u64 start = lookForFreeVirtualMemoryArea(
         MMAP_START,MMAP_END,mm->vm,address,len,&vma);
 
-   if((s64)start < 0)
-      return (s64)start;
+   if(isErrorPointer((void *)start) < 0)
+      return (void *)start;
    if(prot == PROT_NONE)
       return 0; /*Nothing to do.*/
    if((prot & PROT_WRITE) && !(prot & PROT_READ))
-      return -EINVAL; /*Can write,but can't read?*/
+      return makeErrorPointer(-EINVAL); /*Can write,but can't read?*/
    if((flags & MAP_FIXED) && address && address != start)
-      return -EBUSY;  /*Can't map to address.*/
+      return makeErrorPointer(-EBUSY);  /*Can't map to address.*/
    if(!(flags & MAP_ANONYMOUS) && !file)
-      return -EINVAL; /*Invaild file.*/
+      return makeErrorPointer(-EINVAL); /*Invaild file.*/
    if(!(flags & MAP_ANONYMOUS) && (offset & 0xfff))
-      return -EINVAL; /*Invaild offset!*/
+      return makeErrorPointer(-EINVAL); /*Invaild offset!*/
    if(!(flags & MAP_ANONYMOUS) 
        && !(flags & MAP_PRIVATE) && (prot & PROT_WRITE))
-      return -EPROTONOSUPPORT; /*We don't support!*/
+      return makeErrorPointer(-EPROTONOSUPPORT); /*We don't support!*/
    if(!(flags & MAP_ANONYMOUS) 
       && !(file->dentry->inode->cache.operation->getPage))
-      return -EINVAL; /*This file doesn't support mmap!*/
+      return makeErrorPointer(-EINVAL); /*This file doesn't support mmap!*/
    if(address & 0xfff)
-      return -EINVAL; /*Invaild address.*/
+      return makeErrorPointer(-EINVAL); /*Invaild address.*/
    VirtualMemoryArea *new = kmalloc(sizeof(*new));
    if(!new) /*Alloc the VirtualMemoryArea.*/
-      return -ENOMEM;
+      return makeErrorPointer(-ENOMEM);
    new->start = start;
    new->length = len;
    if(flags & MAP_ANONYMOUS)
@@ -484,11 +484,11 @@ int doMMap(VFSFile *file,u64 offset,pointer address,u64 len,
    {
       new->next = vma->next;
       vma->next = new;
-      return 0;
+      return (void *)start;
    } /*Insert vma to current->mm->vm.*/
    new->next = mm->vm;
    mm->vm = new;
-   return 0;
+   return (void *)start;
 }
 
 int taskSwitchMemory(TaskMemory *old,TaskMemory *new)
@@ -519,6 +519,7 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
    new->wait = 0;
    new->exec = 0;
    new->vm = 0;
+   new->vkernel = 0;
    if(!new->page && (kfree(new) || 1))
       return 0; /*OOM,Out Of Memory.*/
 
@@ -531,6 +532,7 @@ TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags)
       new->exec = vfsGetFile(old->exec); /*Add the reference count.*/
    if(!old->page)
       return new;
+   new->vkernel = old->vkernel;
    pml4e = new->page;
    opml4e = old->page;
    
@@ -673,12 +675,13 @@ int doPageFault(IRQRegisters *reg)
    if(!vma && current->mm->vm)
       vma = current->mm->vm;
    else if(!vma || !vma->next)
-      return -EFAULT;
+      return -EFAULT; 
    else
       vma = vma->next;
 
    if(vma->start > address) /*Is the address in the VirtualMemoryArea?*/
       return -EFAULT;
+      /*Maybe we should send the SIGDEV signal to the task.*/
 
    VFSFile *file = vma->file;
    if(file)

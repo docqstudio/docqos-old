@@ -45,6 +45,7 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
 {
    ELF64Header header;
    int retval;
+   void *error;
    if(lseekFile(file,0,SEEK_SET) < 0)
       return -ENOEXEC;
    if((retval = readFile(file,&header,sizeof(header))) <= 0) /*Read header.*/
@@ -80,20 +81,20 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
       if(phdrs[i].flags & PF_R)
          prot |= PROT_READ;
       if(phdrs[i].filesz == 0) /*The data is not in file!!!!*/
-         retval = doMMap(0,0,phdrs[i].vaddr,
+         error = doMMap(0,0,phdrs[i].vaddr,
              phdrs[i].memsz,prot,MAP_ANONYMOUS | MAP_FIXED | MAP_PRIVATE);
       else
-         retval = doMMap(file,phdrs[i].offset,phdrs[i].vaddr,
+         error = doMMap(file,phdrs[i].offset,phdrs[i].vaddr,
               phdrs[i].memsz,prot,MAP_FIXED | MAP_PRIVATE);
-      if(retval)
-         return retval;
+      if(isErrorPointer(error))
+         return getPointerError(error);
    }
-   if((retval = doMMap(0,0,0xffffe000,0x2000,
+   if(isErrorPointer(error = doMMap(0,0,0xffffd000,0x2000,
         PROT_WRITE | PROT_READ,MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE)))
-      return retval;
+      return getPointerError(error);
        /*Map the user stack,from 0xffffe000 to 0xffffffff.*/
        /*(4GB - 8K) ~ 4GB.*/
-   pointer stackTop = 0xfffffffful;
+   pointer stackTop = 0xffffeffful;
    regs->rcx = regs->rbx = 0;
    if(!arguments) /*Are there arguments?*/
       goto out;

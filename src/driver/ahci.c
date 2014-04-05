@@ -204,7 +204,7 @@ static int ahciSendCommandATAPI(AHCIPort *port,u8 *command,u8 commandSize,
 
    ahciStartCommand(port);
 
-   current->state = TaskStopping;
+   current->state = TaskUninterruptible;
    setIRQData(ahciIRQVector,data);
    port->issue = 1;
    schedule(); /*Wait for an interrupt.*/
@@ -323,7 +323,7 @@ static int ahciIRQ(IRQRegisters *reg,void *__data)
    if(!port->interruptStatus)
       return 0;
    port->interruptStatus = port->interruptStatus; /*Clear all bits.*/
-   wakeUpTask((Task *)data[0]); /*Wake up the task.*/
+   wakeUpTask((Task *)data[0],0); /*Wake up the task.*/
    return 0;
 }
 
@@ -402,7 +402,7 @@ static int ahciEnablePortATAPI(AHCIPort *port,int i)
 
       ahciStartCommand(port);
 
-      current->state = TaskStopping;
+      current->state = TaskUninterruptible;
       setIRQData(ahciIRQVector,data);
       port->issue = 1; /*Send the command.*/
       schedule(); /*Wait for an interrupt.*/

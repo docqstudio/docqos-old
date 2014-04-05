@@ -127,13 +127,13 @@ static u8 keyboardCallback(u8 data,KeyboardState *state)
       switch(data)
       {
       case 0x48:
-         return KEY_UP;
+         return make ? KEY_UP : 0;
       case 0x50:
-         return KEY_DOWN;
+         return make ? KEY_DOWN : 0;
       case 0x4d:
-         return KEY_RIGHT;
+         return make ? KEY_RIGHT : 0;
       case 0x4b:
-         return KEY_LEFT;
+         return make ? KEY_LEFT : 0;
       default:
          return 0; /*Ingore.*/
       }

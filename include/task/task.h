@@ -16,20 +16,24 @@ typedef struct VirtualMemoryArea VirtualMemoryArea;
 typedef struct TaskFileSystem TaskFileSystem;
 typedef struct TaskMemory TaskMemory;
 typedef struct TaskFiles TaskFiles;
+typedef struct TaskSignal TaskSignal;
 
 typedef enum ForkFlags{
    ForkShareNothing = 0,
    ForkShareMemory  = 1,
    ForkShareFiles   = 2,
    ForkShareFileSystem = 4,
-   ForkWait         = 8,
-   ForkKernel       = 16
+   ForkShareSignal  = 8,
+   ForkWait         = 16,
+   ForkKernel       = 32
 } ForkFlags;
 
 typedef enum TaskState{
-   TaskRunning,
-   TaskStopping,
-   TaskZombie
+   TaskRunning          = 1,
+   TaskInterruptible    = 2,
+   TaskUninterruptible  = 4,
+   TaskZombie           = 8,
+   TaskStopping         = 16
 } TaskState;
 
 typedef struct Task{
@@ -43,12 +47,16 @@ typedef struct Task{
    ListHead list;
    ListHead children;
    ListHead sibling;
+   ListHead runnable;
 
    u32 preemption;
    TaskFiles *files;
    TaskFileSystem *fs;
    TaskMemory *mm;
    TaskMemory *activeMM;
+   TaskSignal *sig;
+   u64 pending;
+   u64 blocked;
 
    u8 waiting;
    u8 needSchedule;
@@ -79,7 +87,8 @@ int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters
 int doWaitPID(u32 pid,int *result,u8 wait);
 
 int createKernelTask(KernelTask task,void *arg);
-int wakeUpTask(Task *task);
+int wakeUpTask(Task *task,TaskState state);
+Task *lookForTaskByPID(unsigned int pid);
 
 int initTask(void) __attribute__ ((noreturn));
 /*It will never return!!!It will be called in the end of kmain.*/

@@ -2,6 +2,8 @@
 #include <task/task.h>
 #include <task/elf64.h>
 #include <task/semaphore.h>
+#include <task/signal.h>
+#include <task/vkernel.h>
 #include <memory/buddy.h>
 #include <memory/paging.h>
 #include <video/console.h>
@@ -39,14 +41,19 @@ extern int taskSwitchMemory(TaskMemory *old,TaskMemory *new);
 extern TaskFileSystem *taskForkFileSystem(TaskFileSystem *old,ForkFlags flags);
 extern TaskFiles *taskForkFiles(TaskFiles *old,ForkFlags flags);
 extern TaskMemory *taskForkMemory(TaskMemory *old,ForkFlags flags);
+extern TaskSignal *taskForkSignal(TaskSignal *old,ForkFlags flags);
+
 extern int taskExitFileSystem(TaskFileSystem *old);
 extern int taskExitFiles(TaskFiles *old);
 extern int taskExitMemory(TaskMemory *old);
+extern int taskExitSignal(TaskSignal *old);
 
-static SpinLock scheduleLock; /*Protect the task list and 'list' field of Task.*/
-static SpinLock taskLock; /*Protect 'parent','children' and 'sibling' field of Task.*/
+static SpinLock allTaskLock; /*Protect the task list and 'list' field of Task.*/
+static SpinLock runnableTaskLock; /*Protect the runnable task list and 'runnable' field of Task.*/
+static SpinLock taskFamilyLock; /*Protect 'parent','children' and 'sibling' field of Task.*/
 
-static ListHead tasks; 
+static ListHead allTaskList;
+static ListHead runnableTaskList; /*The runnable tasks.*/
 
 static AtomicType pid;
 
@@ -67,26 +74,28 @@ static Task *allocTask(u64 rip)
    ret->rsp = 
       (u64)(pointer)(((u8 *)ret) + TASK_KERNEL_STACK_SIZE - 1);
    ret->rip = rip;
-   ret->state = TaskRunning;
+   ret->state = TaskUninterruptible; /*The task can't run!!!*/
 /* ret->preemption = 0;
    ret->root = ret->pwd = 0;
    for(int i = 0;i < sizeof(ret->fd)/sizeof(ret->fd[0]);++i)
-      ret->fd[i] = 0;*/
+      ret->fd[i] = 0;
+   ret->pending = 0;
+   ret->blocked = 0;*/ /*They have been set to zero by memset.*/
 
    initList(&ret->children);
    initList(&ret->sibling);
    initList(&ret->list);
+   initList(&ret->runnable);
    return ret;
 }
 
 static Task *addTask(Task *ret)
 {
-   u64 rflags;
-   lockSpinLockCloseInterrupt(&scheduleLock,&rflags);
+   lockSpinLock(&allTaskLock);
 
-   listAddTail(&ret->list,&tasks);
+   listAddTail(&ret->list,&allTaskList);
 
-   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
+   unlockSpinLock(&allTaskLock);
 
    return ret;
 }
@@ -99,12 +108,11 @@ static Task *createTask(u64 rip)
 
 static int destoryTask(Task *task)
 {
-   u64 rflags;
-   lockSpinLockCloseInterrupt(&scheduleLock,&rflags);
+   lockSpinLock(&allTaskLock);
 
    listDelete(&task->list);
    
-   unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
+   unlockSpinLock(&allTaskLock);
    freePages(getPhysicsPage(task),1);
    return 0;
 }
@@ -167,7 +175,7 @@ static int idle(void)
 static int scheduleTimeoutCallback(void *arg)
 {
    Task *task = (Task *)arg;
-   wakeUpTask(task); /*Wake up this task and return.*/
+   wakeUpTask(task,0); /*Wake up this task and return.*/
    return 0;
 }
 
@@ -186,16 +194,12 @@ Task *getCurrentTask(void)
 
 int finishScheduling(Task *from) /*It will be called in retFromFork,schedule etc.*/
 {
-   Task *cur = getCurrentTask();
-   if(cur->preemption == 0) /*First run.*/
-      disablePreemption(); /*It will be enabled when we unlock spin lock.*/
    if(!from->mm) /*Kernel Task?*/
    {
       if(from->activeMM)
          taskExitMemory(from->activeMM); /*Exit.*/
       from->activeMM = from->mm = 0;
    }
-   unlockSpinLock(&scheduleLock);
    return 0;
 }
 
@@ -204,41 +208,40 @@ int schedule(void)
    Task *prev = getCurrentTask();
    Task *next = 0;
    Task *from;
-   ListHead *start = (prev == idleTask) ? &tasks : &prev->list;
 
    u64 rflags;
 repeat:
    disablePreemption();
-   lockSpinLockCloseInterrupt(&scheduleLock,&rflags);
-   /*If we schedule successfully,it will be unlocked in finishScheduling.*/
-
-   if(prev->needSchedule)
-      prev->needSchedule = 0;
-   for(ListHead *list = start->next;list != start;list = list->next)
+   lockSpinLockCloseInterrupt(&runnableTaskLock,&rflags);
+   if(prev->state == TaskInterruptible &&
+              taskSignalPending(prev))
    {
-      if(list == &tasks)
-         continue;
-      Task *temp = listEntry(list,Task,list);
-      if(temp->state == TaskRunning)
+      prev->state = TaskRunning; /*Restore the status to TaskRunning.*/
+      if(!prev->needSchedule) /*Does the task really need to schedule.*/
       {
-         next = temp;
-         break;
+         unlockSpinLockRestoreInterrupt(&runnableTaskLock,&rflags);
+         goto done; /*Do nothing.*/
       }
    }
+   prev->needSchedule = 0; /*Clear the need schedule flags.*/
 
-   if(!next)
-   {
-      if(prev->state == TaskRunning)
-         next = prev;
-      else
-         next = idleTask;
-   }
+   if(!listEmpty(&runnableTaskList))
+      next = listEntry(runnableTaskList.next,Task,runnable);
+   if(next) /*Found a runnable task?*/
+      listDelete(&next->runnable);
+   else if(prev->state == TaskRunning)
+      next = prev;
+   else
+      next = idleTask; /*No runnable tasks,switch to the idle task.*/
 
    if(next == prev)
    {
-      unlockSpinLockRestoreInterrupt(&scheduleLock,&rflags);
+      unlockSpinLockRestoreInterrupt(&runnableTaskLock,&rflags);
       goto done;
    }
+   if(prev != idleTask && prev->state == TaskRunning && listEmpty(&prev->runnable))
+      listAddTail(&prev->runnable,&runnableTaskList);
+   unlockSpinLock(&runnableTaskLock); /*Add the previous task to runnable task list.*/
 
    if(!next->mm) /*Switch to kernel Task?*/
       next->activeMM = taskForkMemory(prev->activeMM,ForkShareMemory);
@@ -289,7 +292,7 @@ int doFork(IRQRegisters *regs,ForkFlags flags)
    regs->rflags |= (1 << 9); /*Start interrupt.*/
 
    Task *current = getCurrentTask();
-   Task *new = allocTask((u64)retFromFork);
+   Task *new = createTask((u64)retFromFork);
    if(!new)
       return -ENOMEM;
 
@@ -303,15 +306,18 @@ int doFork(IRQRegisters *regs,ForkFlags flags)
    new->files = taskForkFiles(current->files,flags);
    if(!new->files)
       goto failed;
+   new->sig = taskForkSignal(current->sig,flags);
+   if(current->sig && !new->sig)
+      goto failed;
        /*Copy mm,fs and files.*/
 
    if(regs->rsp == (u64)-1)
       regs->rsp = new->rsp;
    
    new->parent = current;
-   lockSpinLock(&taskLock);
+   lockSpinLock(&taskFamilyLock);
    listAdd(&new->sibling,&new->parent->children);
-   unlockSpinLock(&taskLock);
+   unlockSpinLock(&taskFamilyLock);
    
    *(IRQRegisters *)(new->rsp -= sizeof(*regs))
       = *regs; /*They will be popped in retFromFork.*/
@@ -319,7 +325,7 @@ int doFork(IRQRegisters *regs,ForkFlags flags)
    if(flags & ForkWait)
       new->mm->wait = &wait;
 
-   addTask(new);
+   wakeUpTask(new,0); /*Wake up the child task.*/
    if(flags & ForkWait)
    {
       downSemaphore(&wait); /*Wait for exit or execve.*/
@@ -335,6 +341,8 @@ failed:
       taskExitFiles(new->files);
    if(new->fs)
       taskExitFileSystem(new->fs);
+   if(new->sig)
+      taskExitSignal(new->sig);
    destoryTask(new); /*Destory the new task.*/
    return -ENOMEM;
 }
@@ -354,13 +362,15 @@ int doExit(int n)
    taskExitMemory(current->mm);
    taskExitFileSystem(current->fs);
    taskExitFiles(current->files);
+   taskExitSignal(current->sig);
         /*Exit mm,files and files.*/
    current->mm = 0;
    current->fs = 0;
    current->files = 0;
    current->activeMM = 0;
+   current->sig = 0;
 
-   lockSpinLock(&taskLock);
+   lockSpinLock(&taskFamilyLock);
    for(ListHead *list = current->children.next;list != &current->children;
       list = current->children.next)
    {
@@ -371,11 +381,12 @@ int doExit(int n)
    }
    
    if(current->parent->waiting)
-      wakeUpTask(current->parent); /*If parent is waiting,wake up.*/
-   unlockSpinLock(&taskLock); 
+      wakeUpTask(current->parent,0); /*If parent is waiting,wake up.*/
+   unlockSpinLock(&taskFamilyLock); 
 
    schedule();
 
+   asm volatile("ud2");
    for(;;);
 }
 
@@ -385,8 +396,8 @@ int doWaitPID(u32 pid,int *result,u8 nowait)
    Task *child;
 retry:;
    u8 has = 0;
-   lockSpinLock(&taskLock);
-   current->state = TaskStopping;
+   lockSpinLock(&taskFamilyLock);
+   current->state = TaskInterruptible;
    current->waiting = 1; /*Tell the children that their parent is waiting.*/
    for(ListHead *list = current->children.next;list != &current->children;list = list->next)
    {
@@ -401,7 +412,7 @@ retry:;
          current->waiting = 0;    /*Find!!!Restore current->waiting and current->state.*/
          current->state = TaskRunning;
          listDelete(&child->sibling);
-         unlockSpinLock(&taskLock);
+         unlockSpinLock(&taskFamilyLock);
          if(result)
             *result = child->exitCode;
          pid = child->pid;
@@ -415,12 +426,14 @@ retry:;
       goto wait;
    current->waiting = 0;
    current->state = TaskRunning;
-   unlockSpinLock(&taskLock);
+   unlockSpinLock(&taskFamilyLock);
    return has ? -ETIMEDOUT : -ECHILD;
 wait:
-   unlockSpinLock(&taskLock);
+   unlockSpinLock(&taskFamilyLock);
    schedule(); /*Wait for a zombie child.*/
                 /*Wake up in doExit.*/
+   if(taskSignalPending(current))
+      return -EINTR;
    goto retry;
 }
 
@@ -429,6 +442,7 @@ int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters
    int ret = 0;
    u8 arguments[1024];
    int size = 0,i = 0,pos = 0;
+   TaskSignal *sig;
    if(!argv) /*Are there any arguments?*/
       goto next;
    for(i = 0;argv[i];++i) /*Copy arguments to the kernel stack.*/
@@ -478,6 +492,18 @@ next:;
       ret = elf64Execve(file,0,0,0,regs); /*There aren't arguments.*/
    if(ret)
       goto failed;
+   new->vkernel = doMMap(getVKernelFile(),0,DEFAULT_VKERNEL_ADDRESS,0x1000,
+              PROT_READ | PROT_EXEC,MAP_FIXED);
+   if(isErrorPointer(new->vkernel) && (ret = getPointerError(new->vkernel)))
+      goto failed;
+
+   ret = -ENOMEM;
+   sig = current->sig;
+   
+   current->sig = taskForkSignal(0,ForkShareNothing);
+   if(!current->sig && ((current->sig = sig) || 1))
+      goto failed;
+   taskExitSignal(sig);
 
    for(int j = 0;j < TASK_MAX_FILES;++j)
    {
@@ -523,26 +549,59 @@ int createKernelTask(KernelTask task,void *arg)
    return 0;
 }
 
-int wakeUpTask(Task *task)
+int wakeUpTask(Task *task,TaskState state)
 {
    if(!task)
       return -EINVAL;
+   u64 rflags;
+   int retval = -EINVAL;
+   if(!state)
+      state = TaskInterruptible | TaskUninterruptible;
+   
+   lockSpinLockCloseInterrupt(&runnableTaskLock,&rflags);
+
+   if(!(task->state & state))
+      goto out;
    task->state = TaskRunning;
-   return 0;
+   if(listEmpty(&task->runnable))
+      listAdd(&task->runnable,&runnableTaskList);
+   retval = 0;
+
+out:
+   unlockSpinLockRestoreInterrupt(&runnableTaskLock,&rflags);
+   return retval;
+}
+
+Task *lookForTaskByPID(unsigned int pid)
+{
+   Task *ret;
+   lockSpinLock(&allTaskLock);
+
+   for(ListHead *tmp = allTaskList.next;tmp != &allTaskList;tmp = tmp->next)
+   {
+      Task *task = listEntry(tmp,Task,list);
+      if(task->pid == pid && (ret = task))
+         break;
+   } /*It's so slow,we should have a PID Hash Table.*/
+
+   unlockSpinLock(&allTaskLock);
+   return ret;
 }
 
 int initTask(void)
 {
-   initList(&tasks);
+   initList(&allTaskList);
+   initList(&runnableTaskList);
 
-   initSpinLock(&scheduleLock);
-   initSpinLock(&taskLock);
+   initSpinLock(&allTaskLock);
+   initSpinLock(&taskFamilyLock);
+   initSpinLock(&runnableTaskLock);
 
    atomicSet(&pid,0);
 
-   idleTask = allocTask((u64)(pointer)(&idle));
+   idleTask = createTask((u64)(pointer)(&idle));
+   idleTask->state = TaskRunning;
    scheduleFirst(); /*Never return.*/
 
-   (void)createTask;
    for(;;);
 }

@@ -2,25 +2,16 @@
 #include <video/framebuffer.h>
 #include <video/tty.h>
 #include <task/task.h>
+#include <task/signal.h>
+#include <task/semaphore.h>
 #include <cpu/spinlock.h>
 #include <cpu/io.h>
+#include <cpu/ringbuffer.h>
 #include <memory/kmalloc.h>
 #include <lib/string.h>
 #include <filesystem/virtual.h>
 #include <filesystem/devfs.h>
 #include <time/time.h>
-
-typedef struct TTYTaskQueue{
-   u8 type; /*1:Read from screen;2:Write to screen;3:Data from keyboard.*/
-   Task *task;
-   
-   u8 data;
-   union{
-      char *s;
-      KeyboardCallback *callback;
-   };
-   ListHead list;
-} TTYTaskQueue;
 
 typedef struct TTYCharacter
 {
@@ -47,21 +38,28 @@ typedef struct TTYScreen
                    /*The font information.*/
    TTYCharacter new[768 / 18][1024 / 10]; /*The characters.*/
    unsigned char dirty[768 / 18]; /*Is the line dirty?*/
+   Semaphore semaphore; /*The semaphore of the tty screen.*/
 } TTYScreen;
 
 #define TTY_REFRESH_TICKS         (TIMER_HZ / 1)
 #define TTY_REFRESH_LASTEST_TICKS (TIMER_HZ / 3)
 
-static Task *ttyTask = 0;
-static SpinLock ttyTaskQueueLock;
-static ListHead ttyTaskQueue;
+#define TIOCSPGRP 5
+
 static TTYScreen ttyMainScreen;
+static volatile unsigned int ttyPGRP; 
+static RingBuffer ttyKeyboardBuffer;
+static RingBuffer ttyReadBuffer;
+static KeyboardCallback *ttyKeyboardCallback;
+
+static int ttyIOControl(VFSFile *file,int cmd,void *data);
 
 static VFSFileOperation ttyOperation = {
    .read = (void *)&ttyRead,
    .write = (void *)&ttyWrite,
    .readDir = 0,
-   .lseek = 0
+   .lseek = 0,
+   .ioctl = &ttyIOControl
 };
 
 
@@ -69,6 +67,7 @@ static int ttyWriteScreen(TTYScreen *screen,const char *data,int length)
 {
    char c;
    unsigned int red = 0xff,green = 0xff,blue = 0xff;
+   downSemaphore(&screen->semaphore);
    for(int i = 0;i < length;++i)
    {
       switch((c = *data++)) 
@@ -151,12 +150,14 @@ static int ttyWriteScreen(TTYScreen *screen,const char *data,int length)
       screen->new[screen->y][screen->x].character = '\0';
    else
       screen->new[screen->y][screen->x].change = 0;
+   upSemaphore(&screen->semaphore);
    return 0;
 }
 
 static int ttyUpdate(TTYScreen *screen)
 {
    unsigned int line = -1;
+   downSemaphore(&screen->semaphore);
    frameBufferScroll(screen->scroll);
         /*Scroll the screen.*/
 
@@ -189,28 +190,51 @@ static int ttyUpdate(TTYScreen *screen)
       frameBufferRefreshLine(0,0); /*Refresh all!*/
    
    screen->scroll = 0;
-
+   upSemaphore(&screen->semaphore);
    return 0;
 }
 
-static int ttyTaskFunction(void *data)
+static int ttyKeyboardTask(void *unused)
 {
-   KeyboardState state = {.caps = 0,.num = 1,.scroll = 0,.shift = 0,.ctrl = 0};
-   u64 rflags;
-   unsigned long long int ticks = 0; 
-              /*The ticks when we did the lastest refreshing.*/
-   unsigned long long int current = 0;
-              /*The ticks now.*/
-   int position = 0;
-   int offsetx = 0,offsety = 0;
-   TTYTaskQueue *reader = 0;
-   void *layer;
+   KeyboardState state = {.ctrl = 0,.shift = 0,.caps = 0,.num = 1,.scroll = 0}; 
+   unsigned int data;
+   for(;;)
+   {
+      inRingBuffer(&ttyKeyboardBuffer,&data);
+            /*Get the data from the keyboard buffer.*/
+      data = (*ttyKeyboardCallback)(data,&state); 
+      
+      if(!data || data >= 0x80)
+         continue;
+      if(state.ctrl)
+         switch(data)
+         {
+         case 'c':
+         case 'C': /*Ctrl+C SIGINT.*/
+            ttyWriteScreen(&ttyMainScreen,"^C",2);
+            doKill(ttyPGRP,SIGINT);
+            continue;
+         case 'd':
+         case 'D': /*Ctrl+D EOF.*/
+            data = '\0';
+            break;
+         case '\\': /*Ctrl+\ SIGQUIT.*/
+            ttyWriteScreen(&ttyMainScreen,"^\\",2);
+            doKill(ttyPGRP,SIGQUIT);
+            continue;
+         default:
+            continue;
+         }
+      if(state.shift)
+         continue;
+      outRingBuffer(&ttyReadBuffer,data);
+          /*Write it to ttyReadBuffer for ttyRead.*/
+   }
+   return 0;
+}
 
-   TTYTaskQueue *queue;
-   ttyTask = getCurrentTask();
-   ttyTask->state = TaskStopping;
-   schedule(); /*Wait until receive the first request.*/
-
+static int initTTY(void)
+{
    ttyMainScreen.fb = ttyMainScreen.line = ttyMainScreen.scroll = 0;
    ttyMainScreen.x = ttyMainScreen.y = 0;
    ttyMainScreen.width = 1024;
@@ -219,134 +243,11 @@ static int ttyTaskFunction(void *data)
    ttyMainScreen.columns = 1024 / 10;
    ttyMainScreen.font.height = 18;
    ttyMainScreen.font.width = 10; /*Init some fields of the screen.*/
-   memset(ttyMainScreen.dirty,0,sizeof(ttyMainScreen.dirty));
+   initSemaphore(&ttyMainScreen.semaphore);
 
-   frameBufferFillRect(0x00,0x00,0x00,0,0,1024,768); /*Clear the screen.*/
-   layer = createFrameBufferLayer(1024 / 2 - 45 / 2,768 / 2 - 45 / 2,45,45,0);
-               
-   frameBufferRefreshLine(0,0); /*Refresh all.*/
-   for(;;)
-   {
-      lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
-      while(!listEmpty(&ttyTaskQueue))
-      {
-         queue = listEntry(ttyTaskQueue.next,TTYTaskQueue,list);
-         listDelete(&queue->list); /*Get the queue and delete it.*/
-         unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
-
-         switch(queue->type)
-         {
-         case 1: /*Read.*/
-            if(reader && (queue->data = -EBUSY))
-               break;
-            reader = queue;
-            position = 0;
-            ticks = 0;
-            ttyUpdate(&ttyMainScreen);
-            break;
-         case 2: /*Write.*/
-            ttyWriteScreen(&ttyMainScreen,queue->s,queue->data);
-            if(queue->task) /*Is the task waiting?*/
-               wakeUpTask(queue->task);
-            else
-               kfree(queue->s),kfree(queue);
-            if(!ticks)
-               ticks = getTicks();
-            break;
-         case 3: /*Keyboard press.*/
-            queue->data = (*queue->callback)(queue->data,&state);
-            if(!queue->data)
-               break;
-            switch(queue->data)
-            {
-            case KEY_UP:
-               offsety -= state.shift ? 8 : 1;
-               break;
-            case KEY_DOWN:
-               offsety += state.shift ? 8 : 1;
-               break;
-            case KEY_LEFT:
-               offsetx -= state.shift ? 8 : 1;
-               break;
-            case KEY_RIGHT:
-               offsetx += state.shift ? 8 : 1;
-               break;
-            default:
-               break;
-            }
-            if(queue->data >= 0x80)
-               break;
-            if(state.ctrl && !position && 
-                  (queue->data == 'd' || queue->data == 'D'))
-            { /*Ctrl + D , EOF!*/
-               *reader->s = 0;
-               reader->data = 0; /*No data!*/
-               wakeUpTask(reader->task);
-               reader = 0;
-               break;
-            }
-            if(state.ctrl)
-               break;
-            if(!reader || position != 0 || queue->data != '\b')
-               ttyWriteScreen(&ttyMainScreen,(const char []){queue->data,'\0'},1),
-                  (queue->data != '\n' || !reader ? ttyUpdate(&ttyMainScreen) : 0);
-            if(!reader)
-               break;
-            if(queue->data == '\b' && position == 0)
-               break;
-            else if(queue->data == '\b' && ((--position),1))
-               break;
-            reader->s[position++] = queue->data;
-            if(reader->data == (position - 1) || queue->data == '\n')
-            {
-               reader->s[position] = '\0';
-               reader->data = position;
-               wakeUpTask(reader->task); /*Wake up the task.*/
-               reader = 0;
-            }
-            kfree(queue);
-            break;
-         default:
-            break;
-         }
-         current = getTicks();
-         if(ticks && (current - ticks >= TTY_REFRESH_TICKS) &&
-            ((ticks = 0) || 1))
-            ttyUpdate(&ttyMainScreen);
-
-         lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
-      }
-      if(!offsetx && !offsety)
-         ttyTask->state = TaskStopping;
-      unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
-      if(offsetx || offsety)
-      {
-         int flag;
-         moveFrameBufferLayer(layer,offsetx,offsety,1,1);
-                     /*Move the layer.*/
-         offsetx = offsety = 0;
-         lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
-         if((flag = listEmpty(&ttyTaskQueue)))
-            ttyTask->state = TaskStopping; /*No new requests.*/
-         unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
-         if(!flag)
-            continue;
-      }
-      
-      if(!ticks)
-         schedule(); /*Wait the queue.*/
-      else
-         scheduleTimeout((ticks + TTY_REFRESH_TICKS - current) * (MSEC_PER_SEC / TIMER_HZ));
-                /*Wait until a request is coming or timeout.*/
-   }
-   return 0;
-}
-
-static int initTTY(void)
-{
-   initSpinLock(&ttyTaskQueueLock);
-   initList(&ttyTaskQueue);
-   createKernelTask(&ttyTaskFunction,0);
+   initRingBuffer(&ttyReadBuffer);
+   initRingBuffer(&ttyKeyboardBuffer);
+   createKernelTask(&ttyKeyboardTask,0); /*Create the task.*/
    return 0;
 }
 
@@ -357,94 +258,83 @@ static int registerTTY(void)
 
 int ttyKeyboardPress(KeyboardCallback *callback,u8 data)
 {
-   u64 rflags;
-   TTYTaskQueue *queue = kmalloc(sizeof(*queue));
-   if(unlikely(!queue))
-      return -ENOMEM;
-   queue->task = 0;
-   queue->type = 3; /*Key pressed.*/
-   queue->data = data;
-   queue->callback = callback; 
-
-   lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
-   listAddTail(&queue->list,&ttyTaskQueue);
-   unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
-            /*Tell the tty task and wake it up.*/
-   wakeUpTask(ttyTask);
+   outRingBuffer(&ttyKeyboardBuffer,data);
+   ttyKeyboardCallback = callback;
    return 0;
 }
 
 int ttyWrite(VFSFile *file,const void *string,u64 size)
 {
-   u64 rflags;
-   u8 len = size ? size : strlen(string);
-   if(len == 0)
-      return 0;
-   if((file->mode & O_ACCMODE) != O_WRONLY)
-      if((file->mode & O_ACCMODE) != O_RDWR)
-         return -EBADFD;
-   char *s = kmalloc(len + 1);
-   if(!s)
-      return -ENOMEM;
-   memcpy(s,string,len + 1); /*Copy it.*/
-   TTYTaskQueue *queue = kmalloc(sizeof(*queue));
-   if(!queue && (kfree(s),1))
-      return -ENOMEM;
-   queue->type = 2;
-   queue->task = 0;/*No need to wait it.*/
-   queue->s = s; /*The queue and the string will be free in the tty task0*/
-   queue->data = len;
-   
-   lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
-   listAddTail(&queue->list,&ttyTaskQueue);
-   unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
-             /*Tell the tty task and wake it up!*/
-   wakeUpTask(ttyTask);
+   ttyWriteScreen(&ttyMainScreen,string,size ? : strlen(string));
    return 0;
 }
 
-int ttyRead(VFSFile *file,void *string,u64 data)
+int ttyRead(VFSFile *file,void *__string,u64 data)
 {
-   u64 rflags;
+   unsigned int i = 0;
+   unsigned int c;
+   unsigned char *string = __string;
+   ttyUpdate(&ttyMainScreen);
    switch(data)
    {
    case 1:
-      *(u8 *)string = '\0';
-   case 0:
+      *string++ = '\0';
+   case 0: /*The length of buffer is not long enough.*/
       return data;
    default:
       break;
    }
-   if((file->mode & O_ACCMODE) != O_RDONLY)
-      if((file->mode & O_ACCMODE) != O_RDWR)
-         return -EBADFD;
-   char *s = kmalloc(data);
-   if(!s)
-      return -ENOMEM;
-   TTYTaskQueue *queue = kmalloc(sizeof(*queue));
-   queue->type = 1;
-   queue->data = data - 1;
-   queue->s = s;
-   queue->task = getCurrentTask(); /*We are waiting.*/
+   for(;;)
+   {
+      if(inRingBuffer(&ttyReadBuffer,&c) == -EINTR)
+         return -EINTR; /*Interrupted by signals.*/
+      if(c == '\0' && !i)
+         return 0; /*EOF.*/
+      else if(c == '\0')
+         continue; 
+           /*Not the first character,do nothing.*/
+      if(c != '\b' || i) /*Back Space.*/
+         ttyWriteScreen(&ttyMainScreen,(const char []){c,0},1);
+      if(c == '\b' && !i)
+         continue; /*It's the first character.*/
+      else if(c == '\b')
+      {
+         ++data;
+         --i;
+         --string;
+         ttyUpdate(&ttyMainScreen);
+         continue;
+      }
+      if(data == 3)
+         ttyWriteScreen(&ttyMainScreen,"\n",1);
+             /*Line Feed.*/
+      if(c != '\n')
+         ttyUpdate(&ttyMainScreen);
+      *string++ = c;
+      --data; /*Write the character to the buffer.*/
+      ++i;
+      if(data == 2)
+         *string++ = '\n',++i;
+      if(data == 2 || c == '\n')
+         break;
+   }
+   *string++ = '\0';
+   return i;
+}
 
-   lockSpinLockCloseInterrupt(&ttyTaskQueueLock,&rflags);
-   listAddTail(&queue->list,&ttyTaskQueue);
-   getCurrentTask()->state = TaskStopping; /*Stop current.*/
-   unlockSpinLockRestoreInterrupt(&ttyTaskQueueLock,&rflags);
+static int ttyIOControl(VFSFile *file,int cmd,void *data)
+{
+   switch(cmd)
+   {
+   case TIOCSPGRP:
+      ttyPGRP = *(unsigned int *)data;
+         /*Set the tty PGRP.*/
+      break;
+   default:
+      return -EINVAL;
+   }
 
-   wakeUpTask(ttyTask);
-   schedule();
-
-   if(queue->data <= 0)
-      goto out;
-   memcpy(string,s,queue->data);
-   ((u8 *)string)[queue->data] = '\0'; /*Set end.*/
-
-out:
-   data = queue->data;
-   kfree(s);
-   kfree(queue); /*Free them.*/
-   return data;
+   return 0;
 }
 
 subsysInitcall(initTTY);

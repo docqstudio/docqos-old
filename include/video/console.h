@@ -19,3 +19,4 @@ inline int printl(const char *string, ...)
 }
 
 #endif 
+

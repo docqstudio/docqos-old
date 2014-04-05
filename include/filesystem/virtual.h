@@ -34,6 +34,7 @@ typedef struct VFSFileOperation
    int (*write)(VFSFile *file,const void *buf,u64 size,u64 *seek);
    int (*lseek)(VFSFile *file,s64 offset,int type);
    int (*close)(VFSFile *file);
+   int (*ioctl)(VFSFile *file,int cmd,void *data);
 } VFSFileOperation;
 
 typedef struct VFSINodeOperation
@@ -162,6 +163,7 @@ int doChdir(const char *dir);
 int doGetCwd(char *buffer,u64 size);
 int doDup(int fd);
 int doDup2(int fd,int new);
+int doIOControl(int fd,int cmd,void *data);
 
 VFSFile *vfsGetFile(VFSFile *file);
 VFSFile *vfsPutFile(VFSFile *file);

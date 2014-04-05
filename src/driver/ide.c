@@ -325,7 +325,7 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
    if(ideWaitDRQ(primary))
       goto failed;
 
-   current->state = TaskStopping;
+   current->state = TaskUninterruptible;
    setIRQData(irq,&wait);
    ideOutsw(primary,IDE_REG_DATA,cmdSize / 2,cmd);
    schedule(); /*Wait Interrupt.*/
@@ -343,7 +343,7 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
    sizeRead = ideInb(primary,IDE_REG_LBA1);
    sizeRead |= ideInb(primary,IDE_REG_LBA2) << 8;
 
-   current->state = TaskStopping;
+   current->state = TaskUninterruptible;
    setIRQData(irq,&wait);
    if(buf)
       ideInsl(primary,IDE_REG_DATA,sizeRead / 4,buf);
@@ -352,7 +352,6 @@ static int ideSendCommandATAPI(IDEDevice *device,u8 *cmd,
          ideInl(primary,IDE_REG_DATA);
    schedule();
    setIRQData(irq,&wait);
-
 out:
    upSemaphore(&ideSemaphores[primary]);
    return (sizeRead == transSize) ? 0 : -EIO;
@@ -682,7 +681,7 @@ static int cdromTask(void *arg)
    int newStatus;
    for(;;)
    {
-      getCurrentTask()->state = TaskStopping;
+      getCurrentTask()->state = TaskUninterruptible;
       scheduleTimeout(1000); /*1 second.*/
       newStatus = cdromStatusCheck(device);
       if(status == newStatus)
@@ -719,7 +718,7 @@ static int ideIRQCommon(int primary,IDEInterruptWait *wait)
    {
       wait->bmstatus = busMasterIDEStatus;
       wait->status = status; /*Wake up the task that is waiting.*/
-      wakeUpTask(wait->task);
+      wakeUpTask(wait->task,TaskUninterruptible);
    }
    return 0;
 }

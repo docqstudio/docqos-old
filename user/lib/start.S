@@ -3,6 +3,7 @@
 .extern main
 .extern close
 .global _start
+.global __crt_sigret
 .code64
 
 _start:

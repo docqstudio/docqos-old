@@ -1,6 +1,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <signal.h>
+
+void sigint(int sig)
+{
+   write(stdout,(sig == SIGINT) ?  "SIGINT Signal!" : "Unkonw Signal,BUG?",0);
+   return (void)0;
+}
 
 int shell(void);
 
@@ -54,6 +61,25 @@ usage:
       write(stdout,"                 0:Halt,6:Reboot,1-5:Nothing.\n",0);
       exit(-1);
    }
+
+   {
+      struct sigaction action = 
+      {
+         .sa_handler = &sigint,
+         .sa_mask = {{(1 << SIGINT)}}
+      };
+      sigaction(SIGINT,&action,0);
+   }
+   {
+      struct sigaction action = 
+      {
+         .sa_handler = SIG_IGN,
+         .sa_mask = {{(1 << SIGQUIT)}}
+      };
+      sigaction(SIGQUIT,&action,0);
+   }
+   
+
    write(stdout,"Welcome to DOCQ OS.\n",0);
    shell();
    close(stdin);
@@ -125,9 +151,16 @@ int shellRunCommand(char *cmd)
    if(pid < 0) /*Fail to fork.*/
       return write(stdout,"Can't fork.Abort!",0);
    else if(pid > 0) /*Parent process.*/
-      return (waitpid(pid,&ret,0),ret); /*Wait for the child process.*/
+   {
+      waitpid(pid,&ret,0);
+      pid = getpid();
+      ioctl(stdin,TIOCSPGRP,&pid);
+      return ret;
+   }
 
    int fd;
+   pid = getpid();
+   ioctl(stdin,TIOCSPGRP,&pid);
    if(!shellCommandNeedLookForPath(argv[0]))
       fd = open(argv[0],O_RDONLY);
    else for(int i = 0;i < sizeof(pathenv) / sizeof(pathenv[0]);++i)
@@ -158,7 +191,8 @@ int shell(void)
 {
    char cwd[64] = "\033[01;32mlocalhost \033[01;34m/ $";
    volatile char cmd[35];
-   int i;
+   int i = getpid();
+   ioctl(stdin,TIOCSPGRP,&i);
    for(;;)
    {    /*Print "localhost $(getcwd) # ".*/
       i = getcwd(cwd + 26,sizeof(cwd) - 26 - 4);
