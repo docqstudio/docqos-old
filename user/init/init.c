@@ -98,6 +98,8 @@ const char *getCommandArgument(char **cmd)
    *tmp++ = '\0'; /*Set end.*/
    while(*tmp == ' ') /*Skip ' '.*/
       ++tmp;
+   if(*tmp == '\n')
+      *tmp = '\0';
 out:
    *cmd = tmp;
    return retval;

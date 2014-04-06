@@ -473,9 +473,9 @@ next:;
    if(isErrorPointer(file))
       return getPointerError(file);
    if(!(file->dentry->inode->mode & S_IXUSR))
-      return -EPERM;
+      return closeFile(file),-EPERM;
    if(S_ISDIR(file->dentry->inode->mode))
-      return -EISDIR;
+      return closeFile(file),-EISDIR;
 
    current->activeMM = current->mm =
            taskForkMemory(0,ForkShareNothing);

@@ -1,4 +1,5 @@
 #include <core/const.h>
+#include <core/math.h>
 #include <video/framebuffer.h>
 #include <video/tty.h>
 #include <task/task.h>
@@ -34,8 +35,18 @@ typedef struct TTYScreen
      /*How many lines should we scroll when we do the refreshing.*/
    unsigned int line; /*The current line.*/
    unsigned int fb; /*......*/
-   struct {unsigned int height;unsigned int width;} font;
+   struct {
+      unsigned int height;
+      unsigned int width;
+   } font;
                    /*The font information.*/
+   struct {
+      unsigned int offsetx;
+      unsigned int offsety;
+      unsigned int width;
+      unsigned int height;
+      void *cursor; /*The cursor layer.*/
+   } cursor;       /*The tty cursor information.*/
    TTYCharacter new[768 / 18][1024 / 10]; /*The characters.*/
    unsigned char dirty[768 / 18]; /*Is the line dirty?*/
    Semaphore semaphore; /*The semaphore of the tty screen.*/
@@ -65,7 +76,7 @@ static VFSFileOperation ttyOperation = {
 
 static int ttyWriteScreen(TTYScreen *screen,const char *data,int length)
 {
-   char c;
+   char c = 0;
    unsigned int red = 0xff,green = 0xff,blue = 0xff;
    downSemaphore(&screen->semaphore);
    for(int i = 0;i < length;++i)
@@ -73,6 +84,15 @@ static int ttyWriteScreen(TTYScreen *screen,const char *data,int length)
       switch((c = *data++)) 
       { 
       case '\t':  /*Now ingore it.*/
+         c = 8 - (screen->x & 7);
+         c = min(c,screen->columns - screen->x);
+
+         for(int i = 0;i < c;++i)
+         {
+            TTYCharacter *character = &screen->new[screen->y][screen->x++];
+            character->character = ' ';
+            character->blue = character->red = character->green = 0xff;
+         }
          break; 
       case '\b': /*Back Space.*/
          if(screen->x == 0)
@@ -146,20 +166,27 @@ static int ttyWriteScreen(TTYScreen *screen,const char *data,int length)
             ++screen->fb; 
       } 
    }
-   if(!screen->new[screen->y][screen->x].change)
-      screen->new[screen->y][screen->x].character = '\0';
-   else
-      screen->new[screen->y][screen->x].change = 0;
+   screen->new[screen->y][screen->x].character = '\0';
    upSemaphore(&screen->semaphore);
    return 0;
 }
 
 static int ttyUpdate(TTYScreen *screen)
 {
+   static unsigned int lasty = 0;
    unsigned int line = -1;
    downSemaphore(&screen->semaphore);
    frameBufferScroll(screen->scroll);
         /*Scroll the screen.*/
+
+   moveFrameBufferLayer(screen->cursor.cursor,
+       screen->font.width * screen->x + screen->cursor.offsetx,
+       screen->font.height * screen->fb + screen->cursor.offsety,0,0);
+          /*Move the cursor layer.*/
+   screen->dirty[screen->y] = 1;
+          /*The line of current cursor is dirty.*/
+   screen->dirty[lasty] = 1;
+          /*The line of previous cursor is dirty,too!*/
 
    for(int i = 0;i < screen->lines;++i)
    {
@@ -177,18 +204,24 @@ static int ttyUpdate(TTYScreen *screen)
       { 
          TTYCharacter *character = &screen->new[i][j];
          if(!character->character) 
+         {
+            frameBufferFillRect(0x00,0x00,0x00,j * screen->font.width,height,
+                      screen->width - j * screen->font.width,screen->font.height);
             break; 
+         }
          frameBufferDrawChar(0,0,0,character->red,character->green,character->blue, 
               j * screen->font.width,height,screen->new[i][j].character); 
               /*Draw the character to the screen.*/
       }
       screen->dirty[i] = 0; /*Now the line isn't dirty.*/
    }
+
    if(line != -2 && line != -1 && !screen->scroll)
-      frameBufferRefreshLine(line,1); /*Only refresh one line.*/
+      frameBufferRefreshLine(line,1);
    else
       frameBufferRefreshLine(0,0); /*Refresh all!*/
-   
+   lasty = screen->y;
+
    screen->scroll = 0;
    upSemaphore(&screen->semaphore);
    return 0;
@@ -225,8 +258,6 @@ static int ttyKeyboardTask(void *unused)
          default:
             continue;
          }
-      if(state.shift)
-         continue;
       outRingBuffer(&ttyReadBuffer,data);
           /*Write it to ttyReadBuffer for ttyRead.*/
    }
@@ -241,6 +272,10 @@ static int initTTY(void)
    ttyMainScreen.height = 768;
    ttyMainScreen.lines = 768 / 18;
    ttyMainScreen.columns = 1024 / 10;
+   ttyMainScreen.cursor.offsetx = 0;
+   ttyMainScreen.cursor.offsety = 0;
+   ttyMainScreen.cursor.width = 8;
+   ttyMainScreen.cursor.height = 16;
    ttyMainScreen.font.height = 18;
    ttyMainScreen.font.width = 10; /*Init some fields of the screen.*/
    initSemaphore(&ttyMainScreen.semaphore);
@@ -248,6 +283,10 @@ static int initTTY(void)
    initRingBuffer(&ttyReadBuffer);
    initRingBuffer(&ttyKeyboardBuffer);
    createKernelTask(&ttyKeyboardTask,0); /*Create the task.*/
+
+   ttyMainScreen.cursor.cursor = 
+      createFrameBufferLayer(0,0,ttyMainScreen.cursor.width,ttyMainScreen.cursor.height,0);
+         /*Create a cursor layer.*/
    return 0;
 }
 
@@ -288,6 +327,8 @@ int ttyRead(VFSFile *file,void *__string,u64 data)
    {
       if(inRingBuffer(&ttyReadBuffer,&c) == -EINTR)
          return -EINTR; /*Interrupted by signals.*/
+      if(c == '\t')
+         continue;
       if(c == '\0' && !i)
          return 0; /*EOF.*/
       else if(c == '\0')

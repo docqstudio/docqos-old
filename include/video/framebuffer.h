@@ -22,6 +22,7 @@ void *createFrameBufferLayer(unsigned int x,unsigned int y,
 int moveFrameBufferLayer(void *__layer,unsigned int x,
          unsigned int y,unsigned int fromNow,unsigned char refresh);
 
-inline int frameBufferWriteString(const char *string){
+inline int frameBufferWriteString(const char *string)
+{
    return frameBufferWriteStringInColor(0xff,0xff,0xff,string,0,1);
 }

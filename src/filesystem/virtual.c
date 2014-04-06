@@ -919,6 +919,6 @@ VFSFile *vfsGetFile(VFSFile *file)
    return file;
 }
 
-VFSFile *vfsPutFile(VFSFile *file) __attribute__ ((alias("vfsGetFile")));
+VFSFile *vfsPutFile(VFSFile *file) __attribute__ ((alias("closeFile")));
 
 subsysInitcall(initVFS);

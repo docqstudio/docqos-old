@@ -260,7 +260,7 @@ static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name)
    while(realPosition < inode->size)
    {
       u8 retval;
-      if(pos > 0x1000)
+      if(pos >= 0x1000)
       {
          pos &= 0xfff;
          putPageIntoPageCache(page); /*Put this page.*/

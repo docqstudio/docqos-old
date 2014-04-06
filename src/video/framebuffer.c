@@ -563,7 +563,7 @@ int frameBufferRefreshLine(unsigned int line,unsigned int vaild)
 {
    if(!vaild)
       return frameBufferRefresh(0,0,fbMainScreen.width,fbMainScreen.height);
-   return frameBufferRefresh(0,line * FONT_DISPLAY_HEIGHT,fbMainScreen.width,(line + 1) * FONT_DISPLAY_HEIGHT);
+   return frameBufferRefresh(0,line * 18,fbMainScreen.width,(line + 1) * 18);
 }
 
 void *createFrameBufferLayer(unsigned int x,unsigned int y,
@@ -620,7 +620,7 @@ int moveFrameBufferLayer(void *__layer,unsigned int x,
       goto failed;
 
    if(layer->x == ox && layer->y == oy)
-      return 0; /*No differences between the old values and the new values.*/
+      goto out; /*No differences between the old values and the new values.*/
    if(layer->x == ox) /*The x position is the same.*/
       frameBufferRefreshMap(ox,min(oy,layer->y),ox + layer->width,max(oy,layer->y) + layer->height);
    else if(layer->y == oy) /*The y postion is the same.*/
@@ -629,7 +629,7 @@ int moveFrameBufferLayer(void *__layer,unsigned int x,
       frameBufferRefreshMap(layer->x,layer->y,layer->x + layer->width,layer->y + layer->height),
       frameBufferRefreshMap(ox,oy,layer->width + ox,layer->height + oy);
    if(!refresh)
-      return 0;
+      goto out;
    if(layer->x == ox) /*Refresh them to the video ram.*/
       frameBufferRefresh(ox,min(oy,layer->y),ox + layer->width,max(oy,layer->y) + layer->height);
    else if(layer->y == oy)
@@ -637,6 +637,7 @@ int moveFrameBufferLayer(void *__layer,unsigned int x,
    else
       frameBufferRefresh(layer->x,layer->y,layer->x + layer->width,layer->y + layer->height),
       frameBufferRefresh(ox,oy,layer->width + ox,layer->height + oy);
+out:
    upSemaphore(&fbMainScreen.semaphore);
    return 0; /*Successful!*/
 failed:
