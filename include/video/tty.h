@@ -1,5 +1,6 @@
 #pragma once
 #include <core/const.h>
+#include <memory/user.h>
 
 typedef struct KeyboardState
 {
@@ -19,6 +20,6 @@ typedef u8 (KeyboardCallback)(u8 data,KeyboardState *state);
 #define KEY_LEFT  0x83
 #define KEY_RIGHT 0x84
 
-int ttyWrite(VFSFile *file,const void *string,u64 data);
-int ttyRead(VFSFile *file,void *string,u64 data);
+int ttyWrite(VFSFile *file,UserSpace(const void) *string,u64 data);
+int ttyRead(VFSFile *file,UserSpace(void) *string,u64 data);
 int ttyKeyboardPress(KeyboardCallback *callback,u8 data);

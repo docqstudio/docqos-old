@@ -127,12 +127,32 @@ int shellCommandNeedLookForPath(const char *path)
    return 1; /*Need!!*/
 }
 
+int doTheTest(void)
+{ /*Do some tests about getUserX putUserX .*/
+   int retval = read(stdin,(void *)(~0ul - 7),5);
+   write(stdout,"\n",0);
+   if(retval == -1) /*Test the verifyUserAddress function.*/
+      write(stdout,strerror(errno),0);
+   write(stdout,"\n",0);
+
+   retval = read(stdin,(void *)370ul,777);
+   write(stdout,"\n",0);
+   if(retval == -1) /*Test the exception fix up table.*/
+      write(stdout,strerror(errno),0);
+   write(stdout,"\n",0);
+   return 0;
+}
+
 int shellRunCommand(char *cmd)
 {
    static char pathenv[][64] = {
       "/bin/",
       "/sbin/"
    };
+
+   if(cmd[0] == 't' && cmd[1] == 'e' && cmd[2] == 's' && cmd[3] == 't' && 
+          (cmd[4] == ' ' || cmd[4] == '\0' || cmd[4] == '\n'))
+     return doTheTest(); /*The 'test' command.*/
 
    while(*cmd == ' ')
       ++cmd; /*Skip ' '.*/

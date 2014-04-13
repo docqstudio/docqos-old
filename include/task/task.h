@@ -58,6 +58,8 @@ typedef struct Task{
    u64 pending;
    u64 blocked;
 
+   u64 addressLimit;
+
    u8 waiting;
    u8 needSchedule;
    int exitCode;
@@ -83,8 +85,6 @@ Task *getCurrentTask(void) __attribute__ ((const));
 
 int doExit(int n) __attribute__ ((noreturn));
 int doFork(IRQRegisters *reg,ForkFlags flags);
-int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs);
-int doWaitPID(u32 pid,int *result,u8 wait);
 
 int createKernelTask(KernelTask task,void *arg);
 int wakeUpTask(Task *task,TaskState state);
@@ -129,3 +129,11 @@ inline int preemptionSchedule(void)
       schedule();
    return 0;
 }
+
+#include <memory/user.h>
+
+int doExecve(UserSpace(const char) *path,
+     UserSpace(UserSpace(const char) *) *argv,
+     UserSpace(UserSpace(const char) *) *envp,IRQRegisters *regs);
+int doWaitPID(u32 pid,UserSpace(int) *result,u8 wait);
+

@@ -9,6 +9,7 @@
 #include <cpu/io.h>
 #include <cpu/ringbuffer.h>
 #include <memory/kmalloc.h>
+#include <memory/buddy.h>
 #include <lib/string.h>
 #include <filesystem/virtual.h>
 #include <filesystem/devfs.h>
@@ -63,7 +64,7 @@ static RingBuffer ttyKeyboardBuffer;
 static RingBuffer ttyReadBuffer;
 static KeyboardCallback *ttyKeyboardCallback;
 
-static int ttyIOControl(VFSFile *file,int cmd,void *data);
+static int ttyIOControl(VFSFile *file,int cmd,UserSpace(void) *data);
 
 static VFSFileOperation ttyOperation = {
    .read = (void *)&ttyRead,
@@ -302,22 +303,37 @@ int ttyKeyboardPress(KeyboardCallback *callback,u8 data)
    return 0;
 }
 
-int ttyWrite(VFSFile *file,const void *string,u64 size)
+int ttyWrite(VFSFile *file,UserSpace(const void) *string,u64 size)
 {
-   ttyWriteScreen(&ttyMainScreen,string,size ? : strlen(string));
+   PhysicsPage *page = allocPages(0);
+   long retval = 0;
+   void *buffer;
+   if(!page)
+      return -ENOMEM;
+   
+   buffer = getPhysicsPageAddress(page);
+   if(size)
+      retval = memcpyUser1(buffer,string,size) < 0 ? -EFAULT : size;
+   else
+      retval = strncpyUser1(buffer,string,4096) - 1;
+   if(retval < 0)
+      return freePages(page,0),retval;
+   ttyWriteScreen(&ttyMainScreen,buffer,retval);
+   freePages(page,0);
    return 0;
 }
 
-int ttyRead(VFSFile *file,void *__string,u64 data)
+int ttyRead(VFSFile *file,UserSpace(void) *string,u64 data)
 {
    unsigned int i = 0;
    unsigned int c;
-   unsigned char *string = __string;
+
+   setKernelAddressLimit();
    ttyUpdate(&ttyMainScreen);
    switch(data)
    {
    case 1:
-      *string++ = '\0';
+      return putUser8Safe(string++,0) == 0 ? 0 : -EFAULT;
    case 0: /*The length of buffer is not long enough.*/
       return data;
    default:
@@ -351,26 +367,33 @@ int ttyRead(VFSFile *file,void *__string,u64 data)
              /*Line Feed.*/
       if(c != '\n')
          ttyUpdate(&ttyMainScreen);
-      *string++ = c;
+
+      setUserAddressLimit();
+      if(putUser8Safe(string++,c))
+         return -EFAULT;
       --data; /*Write the character to the buffer.*/
       ++i;
-      if(data == 2)
-         *string++ = '\n',++i;
+      if(data == 2 && c != '\n' && ++i)
+         if(putUser8Safe(string++,'\n'))
+            return -EFAULT;
+      setKernelAddressLimit();
+
       if(data == 2 || c == '\n')
          break;
    }
-   *string++ = '\0';
+   if(putUser8Safe(string++,0))
+      return -EFAULT;
+   setUserAddressLimit();
    return i;
 }
 
-static int ttyIOControl(VFSFile *file,int cmd,void *data)
+static int ttyIOControl(VFSFile *file,int cmd,UserSpace(void) *data)
 {
    switch(cmd)
    {
    case TIOCSPGRP:
-      ttyPGRP = *(unsigned int *)data;
+      return getUser32Safe(data,(u32 *)&ttyPGRP);
          /*Set the tty PGRP.*/
-      break;
    default:
       return -EINVAL;
    }

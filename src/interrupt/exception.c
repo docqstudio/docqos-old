@@ -40,6 +40,9 @@ static const char *exceptionInformation[20] =
 
 int handleException(IRQRegisters *regs)
 {
+   extern unsigned long exceptionFixUpTableStart;
+   extern unsigned long exceptionFixUpTableEnd;
+
    u8 vector = (regs->irq >> 56) & 0xff;
    const char *type;
 
@@ -49,6 +52,12 @@ int handleException(IRQRegisters *regs)
          if(!(*doExceptions[vector])(regs))
             return 0;
 
+   for(unsigned long *fixup = &exceptionFixUpTableStart;
+      fixup < &exceptionFixUpTableEnd;fixup += 2)
+      if(regs->rip == *fixup && (regs->rip = fixup[1],1))
+         return 0; /*Search the exception table.....*/
+
+   /*No results was found,maybe it is a kernel oops.Panic here.*/
    closeInterrupt();
    if(vector >= sizeof(exceptionInformation) / sizeof(exceptionInformation[0]))
       type = "Unknow Type";

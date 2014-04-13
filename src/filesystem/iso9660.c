@@ -9,7 +9,7 @@
 static int iso9660Mount(BlockDevicePart *part,FileSystemMount *mount);
 static int iso9660LookUp(VFSDentry *dentry,VFSDentry *result,const char *name);
 static int iso9660Open(VFSDentry *dentry,VFSFile *file,int mode);
-static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek);
+static int iso9660Read(VFSFile *file,UserSpace(void) *buf,u64 size,u64 *seek);
 static int iso9660LSeek(VFSFile *file,s64 offset,int type);
 static int iso9660ReadDir(VFSFile *file,VFSDirFiller filler,void *data);
 static int iso9660PutPage(PhysicsPage *page);
@@ -310,7 +310,7 @@ static int iso9660Open(VFSDentry *dentry,VFSFile *file,int mode)
    return 0;
 }
 
-static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek)
+static int iso9660Read(VFSFile *file,UserSpace(void) *buf,u64 size,u64 *seek)
 {
    u64 retval = 0;
    VFSINode *inode = file->dentry->inode;
@@ -330,16 +330,18 @@ static int iso9660Read(VFSFile *file,void *buf,u64 size,u64 *seek)
       PhysicsPage *page = getPageFromPageCache(
               &inode->cache,*seek >> 12,&iso9660ReadPage);
                   /*Get the page.*/
-      if(!page)
-         return -EIO;
+      if(!page && (retval = -EIO))
+         goto done;
       void *addr = getPhysicsPageAddress(page);
       u64 read = min(size,0x1000 - (*seek & 0xfff));
-      memcpy(buf,addr + (*seek & 0xfff),read); /*Copy to the buffer.*/
+      if(memcpyUser0(buf,addr + (*seek & 0xfff),read) && (retval = -EFAULT))
+         goto done;/*Copy to the buffer.*/
       *seek += read;
       size -= read;
       retval += read;
       putPageIntoPageCache(page); /*Put the page.*/
    }
+done:
    upSemaphore(&inode->semaphore);
 
    return retval; /*Return how many bytes we have read.*/

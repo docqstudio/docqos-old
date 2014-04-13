@@ -60,17 +60,17 @@ SystemCallHandler systemCallHandlers[] = {
 
 static u64 systemOpen(IRQRegisters *reg)
 {
-   return doOpen((const char *)reg->rbx,(int)reg->rcx);
+   return doOpen((UserSpace(const char) *)reg->rbx,(int)reg->rcx);
 }
 
 static u64 systemRead(IRQRegisters *reg)
 {
-   return doRead((int)reg->rbx,(void *)reg->rcx,(u64)reg->rdx);
+   return doRead((int)reg->rbx,(UserSpace(void) *)reg->rcx,(u64)reg->rdx);
 }
 
 static u64 systemWrite(IRQRegisters *reg)
 {
-   return doWrite((int)reg->rbx,(const void *)reg->rcx,(u64)reg->rdx);
+   return doWrite((int)reg->rbx,(UserSpace(const void) *)reg->rcx,(u64)reg->rdx);
 }
 
 static u64 systemClose(IRQRegisters *reg)
@@ -80,8 +80,9 @@ static u64 systemClose(IRQRegisters *reg)
 
 static u64 systemExecve(IRQRegisters *reg)
 {
-   return doExecve((const char *)reg->rbx,(const char **)reg->rcx,
-                      (const char **)reg->rdx,reg);
+   return doExecve((const char *)reg->rbx,
+             (UserSpace(UserSpace(const char) *) *)reg->rcx,
+             (UserSpace(UserSpace(const char) *) *)reg->rdx,reg);
 }
 
 static u64 systemFork(IRQRegisters *reg)
@@ -94,7 +95,7 @@ static u64 systemFork(IRQRegisters *reg)
 
 static u64 systemWaitPID(IRQRegisters *reg)
 {
-   return doWaitPID((u32)reg->rbx,(int *)reg->rcx,(u8)reg->rdx);
+   return doWaitPID((u32)reg->rbx,(UserSpace(int) *)reg->rcx,(u8)reg->rdx);
 }
 
 static u64 systemExit(IRQRegisters *reg)
@@ -125,22 +126,22 @@ static u64 systemGetPID(IRQRegisters *reg)
 
 static u64 systemGetTimeOfDay(IRQRegisters *reg)
 {
-   return doGetTimeOfDay((u64 *)reg->rbx,(void *)reg->rcx);
+   return doGetTimeOfDay((u64 *)reg->rbx,(UserSpace(void) *)reg->rcx);
 }
 
 static u64 systemGetDents64(IRQRegisters *reg)
 {
-   return doGetDents64((int)reg->rbx,(void *)reg->rcx,(u64)reg->rdx);
+   return doGetDents64((int)reg->rbx,(UserSpace(void) *)reg->rcx,(u64)reg->rdx);
 }
 
 static u64 systemChdir(IRQRegisters *reg)
 {
-   return doChdir((const char *)reg->rbx);
+   return doChdir((UserSpace(const char) *)reg->rbx);
 }
 
 static u64 systemGetCwd(IRQRegisters *reg)
 {
-   return doGetCwd((char *)reg->rbx,(u64)reg->rcx);
+   return doGetCwd((UserSpace(char) *)reg->rbx,(u64)reg->rcx);
 }
 
 static u64 systemLSeek(IRQRegisters *reg)
@@ -168,8 +169,8 @@ static u64 systemKill(IRQRegisters *reg)
 }
 static u64 systemSignalAction(IRQRegisters *reg)
 {
-   return doSignalAction((unsigned int)reg->rbx,(void *)reg->rcx,
-                 (void *)reg->rdx);
+   return doSignalAction((unsigned int)reg->rbx,(UserSpace(void) *)reg->rcx,
+                 (UserSpace(void) *)reg->rdx);
 }
 static u64 systemSignalReturn(IRQRegisters *reg)
 {

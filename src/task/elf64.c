@@ -2,6 +2,7 @@
 #include <task/elf64.h>
 #include <filesystem/virtual.h>
 #include <memory/paging.h>
+#include <memory/user.h>
 #include <interrupt/interrupt.h>
 #include <cpu/gdt.h>
 #include <cpu/io.h>
@@ -41,11 +42,14 @@ typedef struct ELF64ProgramHeader{
 #define PF_W 0x2
 #define PF_R 0x4
 
-int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
+int elf64Execve(VFSFile *file,char *arguments,u64 pos,u64 end,IRQRegisters *regs)
 {
    ELF64Header header;
    int retval;
    void *error;
+   unsigned long limit = getAddressLimit();
+   setKernelAddressLimit();
+
    if(lseekFile(file,0,SEEK_SET) < 0)
       return -ENOEXEC;
    if((retval = readFile(file,&header,sizeof(header))) <= 0) /*Read header.*/
@@ -66,6 +70,8 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
    ELF64ProgramHeader phdrs[header.phnum];
    if((retval = readFile(file,phdrs,sizeof(phdrs))) <= 0) /*Read them!*/
       return retval == -EIO ? -EIO : -ENOEXEC;
+   
+   setAddressLimit(limit);
 
    for(int i = 0;i < sizeof(phdrs) / sizeof(phdrs[0]);++i)
    {
@@ -94,14 +100,19 @@ int elf64Execve(VFSFile *file,u8 *arguments,u64 pos,u64 end,IRQRegisters *regs)
       return getPointerError(error);
        /*Map the user stack,from 0xffffe000 to 0xffffffff.*/
        /*(4GB - 8K) ~ 4GB.*/
-   pointer stackTop = 0xffffeffful;
+   unsigned long stackTop = 0xffffeffful;
    regs->rcx = regs->rbx = 0;
    if(!arguments) /*Are there arguments?*/
       goto out;
    stackTop -= end; /*Put the arguments to the user stack.*/
    for(int i = pos;i < end - sizeof(void *);i += sizeof(void *))
       *(pointer *)(&arguments[i]) += stackTop;
-   memcpy((void *)stackTop,(const void *)arguments,end);
+
+   if(memcpyUser0((void *)stackTop,(const void *)arguments,end))
+      return -ENOMEM; /*Fail to copy the parameters to the user stack?*/
+                      /*The only posible is out of memory!!!*/
+                      /*(Or the doMMap function and doPageFault function is broken...)*/
+
    regs->rcx = (end - pos) / sizeof(void *) - 1;
    regs->rbx = stackTop + pos;
     /*User: %rcx => argument count (argc),%rbx => arguments (argv).*/

@@ -30,11 +30,11 @@ typedef struct TaskFiles{
 typedef struct VFSFileOperation
 {
    int (*readDir)(VFSFile *file,VFSDirFiller filler,void *data);
-   int (*read)(VFSFile *file,void *buf,u64 size,u64 *seek);
-   int (*write)(VFSFile *file,const void *buf,u64 size,u64 *seek);
+   int (*read)(VFSFile *file,UserSpace(void) *buf,u64 size,u64 *seek);
+   int (*write)(VFSFile *file,UserSpace(const void) *buf,u64 size,u64 *seek);
    int (*lseek)(VFSFile *file,s64 offset,int type);
    int (*close)(VFSFile *file);
-   int (*ioctl)(VFSFile *file,int cmd,void *data);
+   int (*ioctl)(VFSFile *file,int cmd,UserSpace(void) *data);
 } VFSFileOperation;
 
 typedef struct VFSINodeOperation

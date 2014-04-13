@@ -115,6 +115,7 @@ int removeTimer(Timer *timer)
 
 int doGetTimeOfDay(u64 *time,void *unused)
 {
-   *time = readRTC();
+   if(putUser64Safe(time,readRTC()))
+      return -EFAULT;
    return 0;
 }

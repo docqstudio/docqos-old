@@ -20,10 +20,18 @@ SECTIONS {
       *(.rodata*)
    }
    . = ALIGN(8);
-   .data : AT( ADDR(.data) - KERNEL_PAGE_OFFSET){
+   .data : AT( ADDR(.data) - KERNEL_PAGE_OFFSET) {
       *(COMMON)
       *(.data)
    }
+   . = ALIGN(8);
+
+   exceptionFixUpTableStart = .;
+   .fixup : AT( ADDR(.fixup) - KERNEL_PAGE_OFFSET) {
+      *(.fixup)
+   }
+   exceptionFixUpTableEnd = .;
+
    . = ALIGN(8);
 
    initcallStart = .;

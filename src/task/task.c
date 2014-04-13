@@ -6,6 +6,7 @@
 #include <task/vkernel.h>
 #include <memory/buddy.h>
 #include <memory/paging.h>
+#include <memory/user.h>
 #include <video/console.h>
 #include <cpu/io.h>
 #include <cpu/atomic.h>
@@ -324,6 +325,10 @@ int doFork(IRQRegisters *regs,ForkFlags flags)
 
    if(flags & ForkWait)
       new->mm->wait = &wait;
+   if(flags & ForkKernel)
+      new->addressLimit = ~0x0ul;
+   else
+      new->addressLimit = PAGE_OFFSET;
 
    wakeUpTask(new,0); /*Wake up the child task.*/
    if(flags & ForkWait)
@@ -390,7 +395,7 @@ int doExit(int n)
    for(;;);
 }
 
-int doWaitPID(u32 pid,int *result,u8 nowait)
+int doWaitPID(u32 pid,UserSpace(int) *result,u8 nowait)
 {
    Task *current = getCurrentTask();
    Task *child;
@@ -414,7 +419,8 @@ retry:;
          listDelete(&child->sibling);
          unlockSpinLock(&taskFamilyLock);
          if(result)
-            *result = child->exitCode;
+            if(putUser32Safe(result,child->exitCode))
+               return -EFAULT;
          pid = child->pid;
          destoryTask(child); /*Destory the child.*/
          return pid;
@@ -437,34 +443,40 @@ wait:
    goto retry;
 }
 
-int doExecve(const char *path,const char *argv[],const char *envp[],IRQRegisters *regs)
+int doExecve(UserSpace(const char) *path,
+     UserSpace(UserSpace(const char) *) *argv,
+     UserSpace(UserSpace(const char) *) *envp,IRQRegisters *regs)
 {
    int ret = 0;
-   u8 arguments[1024];
-   int size = 0,i = 0,pos = 0;
    TaskSignal *sig;
-   if(!argv) /*Are there any arguments?*/
+   char parameters[1024];
+   unsigned int size = 0,pos = 0,i = 0;
+   if(!argv) /*Are there any parameters?*/
       goto next;
-   for(i = 0;argv[i];++i) /*Copy arguments to the kernel stack.*/
+   UserSpace(const char) *next;
+   if(getUserPointerSafe(&argv[0],&next)) /*Get the first parameter.*/
+      return -EFAULT;
+   while(next && pos < sizeof(parameters))
    {
-      int len = strlen(argv[i]) + 1; /*The argument's length.*/
-                                    /*Add 1 for '\0'.*/
-      if(pos + len > sizeof(arguments))
-      {    /*If there are too many arguments,just ignore arguments.*/
-         size = i = pos = 0;
-         goto next;
-      }
-      memcpy((void *)&arguments[pos],(const void *)argv[i],len);
-      argv[i] = (const char *)(pointer)pos; /*Set it to the offset.*/
-      pos += len;
+      long r = strncpyUser1(&parameters[pos],next,sizeof(parameters) - pos);
+                     /*Copy the paramenter to the kernel stack.*/
+      if(r < 0)
+         return -EFAULT;
+      if(putUserPointer(&argv[i++],(void *)(unsigned long)pos))
+         return -EFAULT; /*Put the offset into the argv.*/
+      pos += r;
+      if(getUserPointerSafe(&argv[i],&next)) /*Get next parameter.*/
+         return -EFAULT;
    }
-   size = (i + 1) * sizeof(void *);
-   if(pos + size > sizeof(arguments))
-   {    /*Too many?*/
-      size = i = pos = 0;
+   size = (i + 1) * sizeof(void **);
+   if(pos + size >= sizeof(parameters)) /*Are there enough free space?*/
+   {
+      pos = size = i = 0;
       goto next;
    }
-   memcpy((void *)&arguments[pos],(const void *)argv,size);
+   if(memcpyUser1(&parameters[pos],argv,size)) 
+                  /*Copy the parameter offset into the kernel stack.*/
+      return -EFAULT;
 next:;
    Task *current = getCurrentTask();
    VFSFile *file = openFile(path,O_RDONLY);
@@ -487,7 +499,7 @@ next:;
    taskSwitchMemory(0,current->mm);
    current->mm->exec = file;
    if(pos && i && size) /*There are arguments.*/
-      ret = elf64Execve(file,arguments,pos,pos + size,regs);
+      ret = elf64Execve(file,parameters,pos,pos + size,regs);
    else
       ret = elf64Execve(file,0,0,0,regs); /*There aren't arguments.*/
    if(ret)
@@ -516,6 +528,8 @@ next:;
    }
    if(old)
       taskExitMemory(old);
+
+   setUserAddressLimit();
    return 0;
 failed:
    taskSwitchMemory(0,old);

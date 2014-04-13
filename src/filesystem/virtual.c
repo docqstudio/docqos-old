@@ -1,4 +1,5 @@
 #include <core/const.h>
+#include <core/math.h>
 #include <core/hlist.h>
 #include <cpu/rcu.h>
 #include <block/block.h>
@@ -16,6 +17,56 @@ static HashListHead vfsDentryCache[VFS_DENTRY_CACHE_COUNT];
                     /*Dentry Cache Hash Table.*/
 static RCULock vfsDentryCacheRCU; /*For reading.*/
 static SpinLock vfsDentryCacheLock; /*For writing.*/
+
+static int getFileNameFromPath(UserSpace(const char) **path,unsigned long n,unsigned char *last,
+                        char *filename)
+{
+   long retval;
+   if((retval = verifyUserAddress(*path,1)))
+      return retval;
+   unsigned long limit = getAddressLimit() - (unsigned long)*path;
+   char *__filename = filename;
+   asm volatile( /*Get the filename in the path,and set the path to next filename.*/
+      "   movq %6,%2\n\t"
+      "   movq $0,(%%rbx)\n\t"
+      "   movq $0,(%2)\n\t"
+      "0: movb (%%rax),%%dl\n\t"
+      "   cmpb $\'/\',%%dl\n\t"
+      "   jnz 2f\n\t"
+      "   incq %%rax\n\t"
+      "   decq %%rdi\n\t"
+      "   jz 9f\n\t"
+      "   jmp 0b\n\t" /*First,we need skip '/'.*/
+      "1: movb (%%rax),%%dl\n\t"
+      "   cmpb $\'/\',%%dl\n\t"
+      "   jz 8f\n\t" /*Found a '/',go to the end.*/
+      "2: movb %%dl,(%2)\n\t"
+      "   incq %2\n\t"
+      "   cmpb $0,%%dl\n\t"
+      "   jz 7f\n\t" /*Found '\0',set the "last" and go to the end.*/
+      "   incq %%rax\n\t"
+      "   decq %%rdi\n\t"
+      "   jz 9f\n\t"
+      "   decq %%rsi\n\t"
+      "   jz 6f\n\t"
+      "   jmp 1b\n\t"
+      "6: movq %5,%%rcx\n\t"
+      "   jmp 9f\n\t"
+      "7: incq (%%rbx)\n\t"
+      "8: xorq %%rcx,%%rcx\n\t"
+      "   movq $0,(%2)\n\t"
+      "   incq %2\n\t"
+      "9:\n\t"
+      ".section \".fixup\",\"a\"\n\t"
+      ".quad 0b,9b\n\t"
+      ".quad 1b,9b\n\t" /*Fix up table.*/
+      ".previous\n\t"
+      : "=a"(*path),"=c"(retval),"=&r"(filename),"=D" (limit),"=S"(n)
+      : "i"(-ENAMETOOLONG),"r"(filename),"a"(*path),"c"(-EFAULT),"b"(last),"S"(n),"D"(limit)
+      : "%rdx","memory"
+   );
+   return retval < 0 ? retval : filename - __filename;
+}
 
 static u64 vfsHashName(const char *name,u64 *phash)
 {
@@ -231,42 +282,44 @@ static VFSDentry *vfsLookUpDentry(VFSDentry *dentry)
    return dentry;
 }
 
-static VFSDentry *vfsLookUp(const char *__path)
+static VFSDentry *vfsLookUp(UserSpace(const char) *path)
 {
-   if(*__path == '\0')
-      return 0;
    Task *current = getCurrentTask();
    VFSDentry *ret,*new;
-   u8 length = strlen(__path);
-   char ___path[length + 1];
-   char *path = ___path; 
    u64 hash;
-   u8 error = 0; /*Copy path for writing.*/
-   memcpy((void *)path,(const void *)__path,length + 1);
-   if(*path == '/')
-      ret = current->fs->root;
-   else
-      ret = current->fs->pwd;
-   if(!ret)
+   u8 error = 0;
+   unsigned char last;
+   char filename[32];
+   if(getUser8Safe(path,(unsigned char *)&filename[0]))
       return 0;
+
+   switch(filename[0])
+   {
+   case '\0':
+      return 0;
+   case '/':
+      ret = getCurrentTask()->fs->root;
+      break;
+   default:
+      ret = getCurrentTask()->fs->pwd;
+      break;
+   }
+   if(!ret)
+      return makeErrorPointer(-ENOENT);
    ret = vfsLookUpDentry(ret);
 
    for(;;)
    {
-      while(*path == '/')
-         ++path;
-      if(*path == '\0')
+      if((error = getFileNameFromPath(&path,sizeof(filename),&last,filename)) < 0)
+         return makeErrorPointer(error);
+      if(filename[0] == 0)
          return ret;
-      char *next = path;
-      while(*next != '/' && *next != '\0')
-         ++next;
-      if(*next == '\0')
-         break; /*If last,break.*/
-      *next = '\0'; /*It will be restored soon.*/
-      int pathLength = vfsHashName(path,&hash) + 1;
-      if(path[0] == '.' && path[1] == '\0')
+      if(last)
+         break;
+      int pathLength = vfsHashName(filename,&hash) + 1;
+      if(filename[0] == '.' && filename[1] == '\0')
          goto next;
-      if(path[0] == '.' && path[1] == '.' && path[2] == '\0')
+      if(filename[0] == '.' && filename[1] == '.' && filename[2] == '\0')
       {
          VFSDentry *parent = ret->parent;
          if(!parent)
@@ -289,7 +342,7 @@ static VFSDentry *vfsLookUp(const char *__path)
          ret = parent;
          goto next;
       }
-      VFSDentry *dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+      VFSDentry *dentry = vfsDentryCacheLookUp(ret,hash,filename,pathLength);
       if(dentry)
       {
          ret = dentry;
@@ -299,14 +352,14 @@ static VFSDentry *vfsLookUp(const char *__path)
          goto failed;
       }
       downSemaphore(&ret->inode->semaphore);
-      dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+      dentry = vfsDentryCacheLookUp(ret,hash,filename,pathLength);
                 /*Look for the dentry cache again.*/
       if(likely(!dentry))
       {
          new = createDentry();
          if(unlikely(!new) && (upSemaphore(&ret->inode->semaphore) || 1))
             goto failed;
-         error = (*ret->inode->operation->lookUp)(ret,new,path);
+         error = (*ret->inode->operation->lookUp)(ret,new,filename);
          if((error || !S_ISDIR(new->inode->mode)) && (upSemaphore(&ret->inode->semaphore) || 1)) 
                                                     /*Try to look it up in disk.*/
             goto failedWithNew;
@@ -315,7 +368,7 @@ static VFSDentry *vfsLookUp(const char *__path)
          char *name = (char *)kmalloc(pathLength + 1);
          if(unlikely(!name) && (upSemaphore(&ret->inode->semaphore) || 1)) /*If no memory for name,exit.*/
             goto failedWithNew;
-         memcpy((void *)name,(const void *)path,pathLength + 1);
+         memcpy((void *)name,(const void *)filename,pathLength + 1);
          new->name = name;
          new->hash = hash; /*The hash number.*/
          vfsHashDentry(new);
@@ -323,14 +376,12 @@ static VFSDentry *vfsLookUp(const char *__path)
       }
       upSemaphore(&ret->inode->semaphore);
       ret = dentry;
-next:
-      *next = '/'; /*Restore.*/
-      path = next;
+next:;
    }
     /*Last.*/
-   if(path[0] == '.' && path[1] == '\0')
+   if(filename[0] == '.' && filename[1] == '\0')
       return ret;
-   if(path[0] == '.' && path[1] == '.' && path[2] == '\0')
+   if(filename[0] == '.' && filename[1] == '.' && filename[2] == '\0')
    {
       VFSDentry *parent = ret->parent;
       if(!parent)
@@ -347,19 +398,19 @@ next:
       }
       return parent;
    }
-   int pathLength = vfsHashName(path,&hash) + 1;
-   VFSDentry *dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+   int pathLength = vfsHashName(filename,&hash) + 1;
+   VFSDentry *dentry = vfsDentryCacheLookUp(ret,hash,filename,pathLength);
    if(dentry && (ret = dentry))
       goto found; /*Found!! Just return.*/
    downSemaphore(&ret->inode->semaphore);
-   dentry = vfsDentryCacheLookUp(ret,hash,path,pathLength);
+   dentry = vfsDentryCacheLookUp(ret,hash,filename,pathLength);
                         /*Look for the dentry cache again.*/
    if(likely(!dentry))
    {
       new = createDentry(); /*Alloc a new dentry.*/
       if(unlikely(!new) && (upSemaphore(&ret->inode->semaphore) || 1))
          goto failed;
-      error = (*ret->inode->operation->lookUp)(ret,new,path);
+      error = (*ret->inode->operation->lookUp)(ret,new,filename);
       if(error && (upSemaphore(&ret->inode->semaphore) || 1))
          goto failedWithNew;
       new->parent = ret;
@@ -368,7 +419,7 @@ next:
       if(unlikely(!name) && (upSemaphore(&ret->inode->semaphore) || 1)) 
                                  /*Fill the name field.*/
          goto failedWithNew;
-      memcpy((void *)name,(const void *)path,pathLength);
+      memcpy((void *)name,(const void *)filename,pathLength);
       new->name = name;
       new->hash = hash;
       vfsHashDentry(new);
@@ -382,7 +433,7 @@ failedWithNew:
    __destoryDentry(new);
 failed: /*Failed.*/
    vfsLookUpClear(ret);
-   return 0;
+   return makeErrorPointer(-ENOENT);
 }
 
 static int destoryFile(VFSFile *file)
@@ -394,15 +445,20 @@ static int destoryFile(VFSFile *file)
 
 static int vfsFillDir64(void *__data,u8 isDir,u64 length,const char *name)
 {
-   u8 *buf = ((u8 **)__data)[0];
+   UserSpace(u8) *buf = ((UserSpace(u8) **)__data)[0];
    u64 size = ((u64 *)__data)[1];
 
    if(length + 3 >= size)
       return -EINVAL; /*The buffer is full!*/
-   buf[0] = isDir;
-   buf[1] = length;
-   memcpy((void *)&buf[2],name,length); /*Copy to buffer.*/
-   buf[2 + length] = '\0';
+   if(putUser8Safe(&buf[0],isDir))
+      return -EFAULT;
+   if(putUser8Safe(&buf[1],length))
+      return -EFAULT;
+   if(memcpyUser0((UserSpace(void) *)&buf[2],name,length))
+      return -EFAULT; /*Copy to buffer.*/
+   if(putUser8Safe(&buf[2 + length],0))
+      return -EFAULT;
+
    size -= length + 3;
    buf += length + 3;
    ((u8 **)__data)[0] = buf;
@@ -460,8 +516,8 @@ VFSFile *openFile(const char *path,int mode)
       return (VFSFile *)makeErrorPointer(-EINVAL);
 
    VFSDentry *dentry = vfsLookUp(path);
-   if(!dentry)
-      return (VFSFile *)makeErrorPointer(-ENOENT);
+   if(isErrorPointer(dentry))
+      return (VFSFile *)dentry;
    if((mode & O_DIRECTORY) && !S_ISDIR(dentry->inode->mode))
       return (VFSFile *)makeErrorPointer(-ENOTDIR);
 
@@ -556,7 +612,7 @@ int doDup(int fd)
    return -EMFILE;
 }
 
-int doOpen(const char *path,int mode)
+int doOpen(UserSpace(const char) *path,int mode)
 {
    Task *current = getCurrentTask();
    int fd;
@@ -573,7 +629,7 @@ found:;
    return fd;
 }
 
-int doRead(int fd,void *buf,u64 size)
+int doRead(int fd,UserSpace(void) *buf,u64 size)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
       return -EBADF;
@@ -584,7 +640,7 @@ int doRead(int fd,void *buf,u64 size)
    return readFile(file,buf,size); /*Call file->operation->read.*/
 }
 
-int doWrite(int fd,const void *buf,u64 size)
+int doWrite(int fd,UserSpace(const void) *buf,u64 size)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
       return -EBADF;
@@ -618,7 +674,7 @@ int doClose(int fd)
    return closeFile(file);
 }
 
-int doGetDents64(int fd,void *data,u64 size)
+int doGetDents64(int fd,UserSpace(void) *data,u64 size)
 {
    if((unsigned int)fd >= TASK_MAX_FILES)
       return -EBADF;
@@ -635,7 +691,7 @@ int doGetDents64(int fd,void *data,u64 size)
    return ((void **)__data)[0] - data;
 }
 
-int doIOControl(int fd,int cmd,void *data)
+int doIOControl(int fd,int cmd,UserSpace(void) *data)
 {
    if(fd >= TASK_MAX_FILES || fd < 0)
       return -EBADF;
@@ -647,11 +703,11 @@ int doIOControl(int fd,int cmd,void *data)
    return (*file->operation->ioctl)(file,cmd,data);
 }
 
-int doChdir(const char *dir)
+int doChdir(UserSpace(const char) *dir)
 {
    VFSDentry *dentry = vfsLookUp(dir);
-   if(!dentry)
-      return -ENOENT;
+   if(isErrorPointer(dentry))
+      return getPointerError(dentry);
    if(!S_ISDIR(dentry->inode->mode))
       return (vfsLookUpClear(dentry),-ENOTDIR);
    Task *current = getCurrentTask();
@@ -661,11 +717,11 @@ int doChdir(const char *dir)
    return 0;
 }
 
-int doChroot(const char *dir)
+int doChroot(UserSpace(const char) *dir)
 {
    VFSDentry *dentry = vfsLookUp(dir);
-   if(!dentry)
-      return -ENOENT;
+   if(isErrorPointer(dentry))
+      return getPointerError(dentry);
    if(!S_ISDIR(dentry->inode->mode))
       return (vfsLookUpClear(dentry),-ENOTDIR);
    Task *current = getCurrentTask();
@@ -675,13 +731,15 @@ int doChroot(const char *dir)
    return 0;
 }
 
-int doUMount(const char *point)
+int doUMount(UserSpace(const char) *point)
 {
    if(point[0] == '/' && point[1] == '\0')
       return -EPERM; /*Can not umount / .*/
    int ret,old;
    VFSDentry *dentry = vfsLookUp(point);
    FileSystemMount *mnt; /*Look for this dentry*/
+   if(isErrorPointer(dentry) && (ret = getPointerError(dentry)))
+      goto out;
    ret = -EINVAL;
    if(dentry->parent)
       goto out;
@@ -703,7 +761,7 @@ out:
    return ret;
 }
 
-int doMount(const char *point,FileSystem *fs,
+int doMount(UserSpace(const char) *point,FileSystem *fs,
                   BlockDevicePart *part,u8 init)
 {
    FileSystemMount *mnt = createFileSystemMount();
@@ -737,7 +795,7 @@ found:
    if(!S_ISDIR(mnt->root->inode->mode))
       goto failed;
    VFSDentry *dentry = vfsLookUp(point);
-   if(!dentry) /*Find the dentry of the mount point.*/
+   if(isErrorPointer(dentry)) /*Find the dentry of the mount point.*/
       goto failed;
    mnt->point = dentry;
    mnt->root->parent = 0; 
@@ -774,7 +832,7 @@ out:
    return 0;
 }
 
-int doGetCwd(char *buf,u64 size)
+int doGetCwd(UserSpace(char) *buf,u64 size)
 {
    Task *current = getCurrentTask();
    VFSDentry *pwd = current->fs->pwd;
@@ -812,9 +870,11 @@ int doGetCwd(char *buf,u64 size)
       u8 slen = strlen(name);
       if(j + slen + 1 > size)
          return -EOVERFLOW; /*Add 1 for '\0' or '/'.*/
-      memcpy((void *)&buf[j],(const void *)name,slen);
+      if(memcpyUser0((UserSpace(void) *)&buf[j],(const void *)name,slen))
+         return -EFAULT;
                  /*Copy the name to the buffer.*/
-      buf[j + slen] = ((i == 0) ? '\0' : '/');
+      if(putUser8((unsigned char *)&buf[j + slen],((i == 0) ? '\0' : '/')))
+         return -EFAULT;
       j += slen + 1;
    }
    return j - 1;
